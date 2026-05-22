@@ -103,13 +103,27 @@ def main() -> int:
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    kept = 0
+    # Append-mode + dedup on startup so repeated invocations (or external
+    # respawns) accumulate progress instead of truncating prior variants.
+    existing_ids: set[str] = set()
+    if out_path.exists():
+        for line in out_path.read_text().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                existing_ids.add(json.loads(line)["id"])
+            except (json.JSONDecodeError, KeyError):
+                continue
+    print(f"resuming with {len(existing_ids)} existing entries")
+    kept = len(existing_ids)
     failed = 0
-    with out_path.open("w") as fout:
+    with out_path.open("a") as fout:
         for base in bases:
-            # Preserve the baseline triple itself
-            fout.write(json.dumps(base) + "\n"); fout.flush()
-            kept += 1
+            if base["id"] not in existing_ids:
+                fout.write(json.dumps(base) + "\n"); fout.flush()
+                existing_ids.add(base["id"])
+                kept += 1
             for vi in range(args.variants_per_base):
                 variant_df = generate_variant(
                     base["dockerfile"], base["test_cmd"],
@@ -127,8 +141,12 @@ def main() -> int:
                     failed += 1
                     continue
                 vid = hashlib.sha256(variant_df.encode()).hexdigest()[:12]
+                rec_id = f"{base.get('id', 'unknown')}-v{vi}-{vid}"
+                if rec_id in existing_ids:
+                    print(f"  variant {vi}: already in output, skipping")
+                    continue
                 rec = {
-                    "id": f"{base.get('id', 'unknown')}-v{vi}-{vid}",
+                    "id": rec_id,
                     "dockerfile": variant_df,
                     "test_cmd": base["test_cmd"],
                     "expected_substring": base["expected_substring"],
@@ -141,6 +159,7 @@ def main() -> int:
                     "base_id": base.get("id"),
                 }
                 fout.write(json.dumps(rec) + "\n"); fout.flush()
+                existing_ids.add(rec_id)
                 kept += 1
                 print(f"  variant {vi} kept ({res.baseline_size // 1_000_000} MB)")
                 time.sleep(0.5)  # gentle on api
