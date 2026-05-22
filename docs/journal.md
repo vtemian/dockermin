@@ -2,6 +2,18 @@
 
 Append per session. Last entry at top. 3-5 sentences per entry. What worked, what broke, what was not obvious.
 
+## 2026-05-23 Saturday early hours (variant pipeline completed)
+
+Synthetic variants pipeline ran to completion. 11 bases x 5 variants = 55 attempts. 48 variants kept (~87% pass rate). 7 failures: base 6 lost all 5 (apt-get bloat hit Debian repo dep issues), bases 4 and 9 lost 1 each (deprecated MAINTAINER, OS signals).
+
+Total wall-clock ~2h45m. Cost rough estimate: 55 claude calls x ~$0.10/call cache creation = ~$5.50. The append-mode patch (commit 98e0bc0) made the run resilient to the chaotic respawns that plagued the earlier hour.
+
+Combined dataset at end of session:
+- data/curated/triples.jsonl: 14 base triples (real Dockerfiles from official-images)
+- data/curated/triples_with_variants.jsonl: 11 bases (subset of 14) + 48 synthetic variants
+
+Union ~62 distinct working triples. Below the 100 kill-criterion floor but enough to seed a pilot run. Saturday on the pod can push to 100+ via more bulk annotate against the 96 safe-to-build candidates.
+
 ## 2026-05-22 Friday very-late evening (Vlad + Bot, data pipeline reality check)
 
 Tried to push the dataset pipeline end-to-end tonight. Mixed result, honest report:
