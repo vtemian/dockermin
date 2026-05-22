@@ -168,12 +168,14 @@ def annotate_one(df_text: str, test_cmd: list[str], expected_substring: str,
     if not b.ok:
         return AnnotateResult(ok=False, error=b.error)
     t = run_test_gate(b.tag, test_cmd, expected_substring, timeout_s=test_timeout_s)
+    # Best-effort cleanup of the tagged image regardless of outcome: callers
+    # only need size + test_ok. Keeping every tag fills the disk fast under
+    # parallel curation (8 workers x 200 candidates x ~150MB base = ~250GB).
+    try:
+        _docker_client().images.remove(b.tag, force=True)
+    except Exception:
+        pass
     if not t.ok:
-        # Best-effort cleanup of the tagged image so the disk doesn't fill.
-        try:
-            _docker_client().images.remove(b.tag, force=True)
-        except Exception:
-            pass
         return AnnotateResult(ok=False, error=t.error)
     return AnnotateResult(ok=True, baseline_size=b.size_bytes,
                           baseline_build_s=b.build_seconds, tag=b.tag)
