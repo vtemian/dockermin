@@ -1,0 +1,65 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+*.egg
+.venv/
+venv/
+env/
+.python-version
+
+# Tooling
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# RL / training artifacts
+wandb/
+checkpoints/
+runs/
+outputs/
+*.pt
+*.bin
+*.safetensors
+adapters/
+lora_out/
+
+# Dataset cache
+data/raw/
+data/cache/
+data/scratch/
+.cache/
+hf_cache/
+
+# Docker scratch
+docker_scratch/
+bkcache/
+
+# Secrets / env
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# Notebook noise
+.ipynb_checkpoints/
+*.ipynb
+
+# Local notes Vlad doesn't want committed
+NOTES.local.md
+SCRATCH.md
