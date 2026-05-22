@@ -275,28 +275,49 @@ def fetch_github_search(limit: int = 100) -> Iterable[Candidate]:
     Note: code search does NOT accept the `stars:` qualifier (that is for repo
     search). Using language:Dockerfile + size:<5000 for volume; quality
     filtering happens at annotation time via parse+build+test gates.
-    """
-    cmd = [
-        "gh", "api", "-X", "GET", "search/code",
-        "-f", "q=filename:Dockerfile language:Dockerfile size:<5000",
-        "-F", "per_page=100",
-    ]
-    try:
-        out = subprocess.check_output(cmd, text=True, stderr=subprocess.PIPE)
-    except subprocess.CalledProcessError as e:
-        # gh exits non-zero on auth failures, rate-limit, or 422 query errors.
-        # Surface stderr to the caller and stop iterating; we don't want a
-        # half-written shard or a hard crash deep in the pipeline.
-        stderr = (e.stderr or "").strip() if isinstance(e.stderr, str) else ""
-        print(f"warning: gh api search/code failed (rc={e.returncode}): {stderr}",
-              file=sys.stderr)
-        return
-    time.sleep(GH_SLEEP_S)
-    payload = json.loads(out)
-    items = payload.get("items", []) if isinstance(payload, dict) else []
 
+    Pages through search/code 100 items at a time (GitHub caps total search
+    results at 1000 across all pages).
+    """
     seen_hashes: set[str] = set()
     yielded = 0
+
+    # Multiple query variants to widen the result pool beyond the 1000-item
+    # per-query cap. Each variant is paged up to GitHub's 10-page limit.
+    query_variants = [
+        "filename:Dockerfile language:Dockerfile size:<5000",
+        "filename:Dockerfile language:Dockerfile size:<3000",
+        "filename:Dockerfile language:Dockerfile size:<8000 size:>5000",
+    ]
+
+    items: list[dict] = []
+    for query in query_variants:
+        if yielded + len(items) >= limit * 3:
+            break
+        for page in range(1, 11):  # GitHub search caps at 10 pages
+            cmd = [
+                "gh", "api", "-X", "GET", "search/code",
+                "-f", f"q={query}",
+                "-F", "per_page=100",
+                "-F", f"page={page}",
+            ]
+            try:
+                out = subprocess.check_output(cmd, text=True, stderr=subprocess.PIPE)
+            except subprocess.CalledProcessError as e:
+                stderr = (e.stderr or "").strip() if isinstance(e.stderr, str) else ""
+                print(f"warning: gh api search/code failed (rc={e.returncode}, "
+                      f"query='{query}', page={page}): {stderr}",
+                      file=sys.stderr)
+                break
+            time.sleep(GH_SLEEP_S)
+            payload = json.loads(out)
+            page_items = payload.get("items", []) if isinstance(payload, dict) else []
+            if not page_items:
+                break
+            items.extend(page_items)
+            if len(page_items) < 100:
+                break
+
     for item in items:
         if yielded >= limit:
             return

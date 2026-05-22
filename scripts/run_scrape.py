@@ -18,13 +18,13 @@ def main() -> None:
     OUT.parent.mkdir(parents=True, exist_ok=True)
     count = 0
     with OUT.open("w") as f:
-        for c in fetch_official_images(limit=100):
+        for c in fetch_official_images(limit=120):
             f.write(json.dumps(asdict(c)) + "\n")
             count += 1
-        for c in fetch_awesome_compose(limit=50):
+        for c in fetch_awesome_compose(limit=80):
             f.write(json.dumps(asdict(c)) + "\n")
             count += 1
-        for c in fetch_github_search(limit=150):
+        for c in fetch_github_search(limit=300):
             f.write(json.dumps(asdict(c)) + "\n")
             count += 1
     print(f"wrote {count} candidates to {OUT}")
