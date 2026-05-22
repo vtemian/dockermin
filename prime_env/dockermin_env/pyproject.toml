@@ -5,3 +5,9 @@ dependencies = ["verifiers", "datasets", "dockermin"]
 
 [project.entry-points."verifiers.environments"]
 dockermin = "dockermin_env.dockermin_env:load_environment"
+
+[tool.setuptools]
+packages = ["dockermin_env"]
+
+[tool.setuptools.package-dir]
+dockermin_env = "."
