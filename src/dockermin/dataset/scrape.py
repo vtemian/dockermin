@@ -197,30 +197,47 @@ def fetch_official_images(limit: int = 100) -> Iterable[Candidate]:
         yielded += 1
 
 
-def _walk_awesome_compose_dir(children: list[dict], source_prefix: str) -> Iterable[Candidate]:
-    """Yield Candidates for any Dockerfile entries in a directory listing."""
+def _walk_awesome_compose_dir(children: list[dict], source_prefix: str,
+                              max_depth: int = 2) -> Iterable[Candidate]:
+    """Yield Candidates for any Dockerfile entries in a directory tree.
+
+    awesome-compose stores Dockerfiles in nested subdirs (e.g. angular/angular/Dockerfile).
+    Walk up to max_depth levels deep.
+    """
     for child in children:
-        if child.get("type") != "file":
-            continue
-        name = child.get("name", "")
-        if name != "Dockerfile" and not name.endswith(".Dockerfile"):
-            continue
-        download_url = child.get("download_url")
-        if not download_url:
-            continue
-        try:
-            dockerfile_text = _fetch_raw(download_url)
-        except Exception:
-            continue
-        if not dockerfile_text.strip():
-            continue
-        yield Candidate(
-            source=source_prefix,
-            url=download_url,
-            dockerfile=dockerfile_text,
-            ecosystem=_infer_ecosystem(source_prefix.split(":", 1)[-1]),
-            license="Apache-2.0",
-        )
+        ctype = child.get("type")
+        if ctype == "file":
+            name = child.get("name", "")
+            if name != "Dockerfile" and not name.endswith(".Dockerfile"):
+                continue
+            download_url = child.get("download_url")
+            if not download_url:
+                continue
+            try:
+                dockerfile_text = _fetch_raw(download_url)
+            except Exception:
+                continue
+            if not dockerfile_text.strip():
+                continue
+            yield Candidate(
+                source=source_prefix,
+                url=download_url,
+                dockerfile=dockerfile_text,
+                ecosystem=_infer_ecosystem(source_prefix.split(":", 1)[-1]),
+                license="Apache-2.0",
+            )
+        elif ctype == "dir" and max_depth > 0:
+            sub_path = child.get("path")
+            if not sub_path:
+                continue
+            try:
+                sub_children = _gh_api(f"repos/docker/awesome-compose/contents/{sub_path}")
+            except subprocess.CalledProcessError:
+                continue
+            if not isinstance(sub_children, list):
+                continue
+            yield from _walk_awesome_compose_dir(sub_children, source_prefix,
+                                                 max_depth=max_depth - 1)
 
 
 def fetch_awesome_compose(limit: int = 50) -> Iterable[Candidate]:
@@ -252,10 +269,15 @@ def fetch_awesome_compose(limit: int = 50) -> Iterable[Candidate]:
 
 
 def fetch_github_search(limit: int = 100) -> Iterable[Candidate]:
-    """Search GitHub code for popular small Dockerfiles. Dedupe by content hash."""
+    """Search GitHub code for small Dockerfiles. Dedupe by content hash.
+
+    Note: code search does NOT accept the `stars:` qualifier (that is for repo
+    search). Using language:Dockerfile + size:<5000 for volume; quality
+    filtering happens at annotation time via parse+build+test gates.
+    """
     cmd = [
         "gh", "api", "-X", "GET", "search/code",
-        "-f", "q=filename:Dockerfile stars:>500 size:<5000",
+        "-f", "q=filename:Dockerfile language:Dockerfile size:<5000",
         "-F", "per_page=100",
     ]
     out = subprocess.check_output(cmd, text=True)
