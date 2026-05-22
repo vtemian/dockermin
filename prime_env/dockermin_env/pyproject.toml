@@ -1,0 +1,7 @@
+[project]
+name = "dockermin-env"
+version = "0.0.1"
+dependencies = ["verifiers", "datasets", "dockermin"]
+
+[project.entry-points."verifiers.environments"]
+dockermin = "dockermin_env.dockermin_env:load_environment"
