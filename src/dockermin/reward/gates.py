@@ -22,7 +22,13 @@ def compute_score(*, parse_ok: bool, build_ok: bool, test_ok: bool,
     if text.count("from ") >= 2:                shape += 0.05  # multi-stage
     if "rm -rf /var/lib/apt/lists" in text:     shape += 0.02
     if "--no-install-recommends" in text:       shape += 0.02
-    if ":latest" in text or re.search(r"^from\s+\S+\s*$", text, re.M):
+    # :latest tag penalty and bare-FROM (no tag) penalty: compound separately.
+    # The original combined regex matched any single-token FROM line including
+    # tagged ones because colons are non-whitespace.
+    if ":latest" in text:
+        shape -= 0.05
+    if re.search(r"^from\s+[^\s:@]+\s*$", text, re.M):
+        # bare image reference: no ":tag" and no "@digest" pin
         shape -= 0.05
     if "from scratch" in text and " copy " not in text:
         shape -= 0.10

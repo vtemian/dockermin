@@ -1,0 +1,65 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.0, pytest-9.0.3, pluggy-1.6.0 -- /Users/whitemonk/projects/ai/dockermin/.venv/bin/python3.11
+cachedir: .pytest_cache
+rootdir: /Users/whitemonk/projects/ai/dockermin
+configfile: pyproject.toml
+plugins: anyio-4.13.0
+collecting ... collected 24 items
+
+tests/test_annotate.py::test_gate ERROR                                  [  4%]
+tests/test_annotate.py::test_parse_gate_accepts_valid_dockerfile PASSED  [  8%]
+tests/test_annotate.py::test_parse_gate_rejects_garbage FAILED           [ 12%]
+tests/test_annotate.py::test_parse_gate_rejects_too_short PASSED         [ 16%]
+tests/test_annotate.py::test_build_gate_succeeds_on_minimal_alpine PASSED [ 20%]
+tests/test_annotate.py::test_build_gate_fails_on_broken_command PASSED   [ 25%]
+tests/test_annotate.py::test_test_gate_passes_when_substring_present PASSED [ 29%]
+tests/test_annotate.py::test_test_gate_fails_when_substring_absent PASSED [ 33%]
+tests/test_annotate.py::test_annotate_one_happy_path_flask_smoke PASSED  [ 37%]
+tests/test_annotate.py::test_infer_test_cmd_python PASSED                [ 41%]
+tests/test_annotate.py::test_infer_test_cmd_node PASSED                  [ 45%]
+tests/test_annotate.py::test_infer_test_cmd_falls_back_to_none_on_unknown PASSED [ 50%]
+tests/test_gates.py::test_compute_score_parse_fail_returns_minus_point_1 PASSED [ 54%]
+tests/test_gates.py::test_compute_score_too_few_commands_returns_minus_point_2 PASSED [ 58%]
+tests/test_gates.py::test_compute_score_build_fail_returns_zero PASSED   [ 62%]
+tests/test_gates.py::test_compute_score_build_pass_test_fail_returns_point_05 PASSED [ 66%]
+tests/test_gates.py::test_compute_score_test_pass_full_reduction_returns_around_one PASSED [ 70%]
+tests/test_gates.py::test_shape_bonus_gated_on_test_pass PASSED          [ 75%]
+tests/test_gates.py::test_latest_tag_penalty_applied_when_test_passes FAILED [ 79%]
+tests/test_prompts.py::test_extract_dockerfile_from_fenced_block PASSED  [ 83%]
+tests/test_prompts.py::test_extract_dockerfile_handles_bare_fence PASSED [ 87%]
+tests/test_prompts.py::test_extract_dockerfile_returns_none_on_no_fence PASSED [ 91%]
+tests/test_prompts.py::test_format_messages_includes_dockerfile_and_test_cmd PASSED [ 95%]
+tests/test_reward.py::test_dockermin_reward_garbage_completion_returns_negative PASSED [100%]
+
+==================================== ERRORS ====================================
+_________________________ ERROR at setup of test_gate __________________________
+file /Users/whitemonk/projects/ai/dockermin/src/dockermin/dataset/annotate.py, line 85
+  def test_gate(tag: str, cmd: list[str], expected_substring: str, timeout_s: int = 30) -> TestResult:
+E       fixture 'tag' not found
+>       available fixtures: anyio_backend, anyio_backend_name, anyio_backend_options, cache, capfd, capfdbinary, caplog, capsys, capsysbinary, capteesys, doctest_namespace, free_tcp_port, free_tcp_port_factory, free_udp_port, free_udp_port_factory, monkeypatch, pytestconfig, record_property, record_testsuite_property, record_xml_attribute, recwarn, subtests, tmp_path, tmp_path_factory, tmpdir, tmpdir_factory
+>       use 'pytest --fixtures [testpath]' for help on them.
+
+/Users/whitemonk/projects/ai/dockermin/src/dockermin/dataset/annotate.py:85
+=================================== FAILURES ===================================
+_______________________ test_parse_gate_rejects_garbage ________________________
+tests/test_annotate.py:32: in test_parse_gate_rejects_garbage
+    assert "parse" in result.error.lower()
+E   AssertionError: assert 'parse' in 'too short: 1 < minimum 2'
+E    +  where 'too short: 1 < minimum 2' = <built-in method lower of str object at 0x10937ff00>()
+E    +    where <built-in method lower of str object at 0x10937ff00> = 'too short: 1 < minimum 2'.lower
+E    +      where 'too short: 1 < minimum 2' = ParseResult(ok=False, command_count=1, error='too short: 1 < minimum 2').error
+_______________ test_latest_tag_penalty_applied_when_test_passes _______________
+tests/test_gates.py:46: in test_latest_tag_penalty_applied_when_test_passes
+    assert s_without > s_with
+E   assert 0.5499999999999999 > 0.5499999999999999
+=============================== warnings summary ===============================
+src/dockermin/dataset/annotate.py:31
+  /Users/whitemonk/projects/ai/dockermin/src/dockermin/dataset/annotate.py:31: PytestCollectionWarning: cannot collect test class 'TestResult' because it has a __init__ constructor (from: tests/test_annotate.py)
+    @dataclass(frozen=True)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_annotate.py::test_parse_gate_rejects_garbage - AssertionErr...
+FAILED tests/test_gates.py::test_latest_tag_penalty_applied_when_test_passes
+ERROR tests/test_annotate.py::test_gate
+============== 2 failed, 21 passed, 1 warning, 1 error in 24.76s ===============

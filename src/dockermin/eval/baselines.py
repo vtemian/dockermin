@@ -338,7 +338,7 @@ def baseline_slim(triple: dict) -> EvalEntry:
         from dockermin.dataset.annotate import (
             _docker_client,  # noqa: WPS437  reusing the configured client
             build_gate,
-            test_gate,
+            run_test_gate,
         )
 
         # 1) Build the original image so slim has something to chew on.
@@ -376,8 +376,8 @@ def baseline_slim(triple: dict) -> EvalEntry:
             return _entry("slim", triple, new_df, t0)
 
         # 4) No Dockerfile - run the slim image directly and report its size.
-        t = test_gate(slim_tag, triple["test_cmd"],
-                      triple.get("expected_substring", ""), timeout_s=_DEFAULT_TEST_TIMEOUT_S)
+        t = run_test_gate(slim_tag, triple["test_cmd"],
+                          triple.get("expected_substring", ""), timeout_s=_DEFAULT_TEST_TIMEOUT_S)
         client = _docker_client()
         slim_size = client.images.get(slim_tag).attrs["Size"]
         return EvalEntry(

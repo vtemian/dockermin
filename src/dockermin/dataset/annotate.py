@@ -30,6 +30,7 @@ class BuildResult:
 
 @dataclass(frozen=True)
 class TestResult:
+    __test__ = False  # tell pytest not to auto-collect this as a test class
     ok: bool
     output: str = ""
     exit_code: int | None = None
@@ -82,8 +83,11 @@ def build_gate(df_text: str, timeout_s: int = 300) -> BuildResult:
     return BuildResult(ok=True, tag=tag, size_bytes=size, build_seconds=elapsed)
 
 
-def test_gate(tag: str, cmd: list[str], expected_substring: str, timeout_s: int = 30) -> TestResult:
-    """Run cmd inside the image, capture combined output, match expected substring."""
+def run_test_gate(tag: str, cmd: list[str], expected_substring: str, timeout_s: int = 30) -> TestResult:
+    """Run cmd inside the image, capture combined output, match expected substring.
+
+    Renamed from test_gate to avoid pytest auto-collection.
+    """
     client = _docker_client()
     try:
         container = client.containers.run(
@@ -123,7 +127,7 @@ def annotate_one(df_text: str, test_cmd: list[str], expected_substring: str,
     b = build_gate(df_text, timeout_s=build_timeout_s)
     if not b.ok:
         return AnnotateResult(ok=False, error=b.error)
-    t = test_gate(b.tag, test_cmd, expected_substring, timeout_s=test_timeout_s)
+    t = run_test_gate(b.tag, test_cmd, expected_substring, timeout_s=test_timeout_s)
     if not t.ok:
         return AnnotateResult(ok=False, error=t.error)
     return AnnotateResult(ok=True, baseline_size=b.size_bytes,

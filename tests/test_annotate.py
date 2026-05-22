@@ -5,7 +5,7 @@ import docker
 from dockermin.dataset.annotate import (
     parse_gate, ParseResult,
     build_gate, BuildResult,
-    test_gate, TestResult,
+    run_test_gate, TestResult,
     annotate_one, AnnotateResult,
     infer_test_cmd,
 )
@@ -26,8 +26,11 @@ def test_parse_gate_accepts_valid_dockerfile():
     assert result.command_count == 3
 
 
-def test_parse_gate_rejects_garbage():
-    result = parse_gate("this is not a Dockerfile")
+def test_parse_gate_rejects_empty_input():
+    # The dockerfile lib is extremely lenient - even '@@@' parses as 1
+    # instruction. The only way to trigger GoParseError on plain strings is
+    # the empty-input path ("file with no instructions").
+    result = parse_gate("")
     assert result.ok is False
     assert "parse" in result.error.lower()
 
@@ -38,6 +41,7 @@ def test_parse_gate_rejects_too_short():
     assert "too short" in result.error.lower() or "minimum" in result.error.lower()
 
 
+@pytest.mark.docker
 @pytest.mark.skipif(not DOCKER_AVAILABLE, reason="docker daemon not available")
 def test_build_gate_succeeds_on_minimal_alpine():
     df = "FROM alpine:3.20\nRUN echo hello > /msg\nCMD [\"cat\",\"/msg\"]\n"
@@ -49,6 +53,7 @@ def test_build_gate_succeeds_on_minimal_alpine():
     assert result.tag.startswith("dockermin/curate:")
 
 
+@pytest.mark.docker
 @pytest.mark.skipif(not DOCKER_AVAILABLE, reason="docker daemon not available")
 def test_build_gate_fails_on_broken_command():
     df = "FROM alpine:3.20\nRUN exit 1\n"
@@ -57,26 +62,29 @@ def test_build_gate_fails_on_broken_command():
     assert "build" in result.error.lower() or "exit" in result.error.lower()
 
 
+@pytest.mark.docker
 @pytest.mark.skipif(not DOCKER_AVAILABLE, reason="docker daemon not available")
 def test_test_gate_passes_when_substring_present():
     df = "FROM alpine:3.20\nRUN echo readyok > /msg\nCMD [\"cat\",\"/msg\"]\n"
     build = build_gate(df)
     assert build.ok
-    result = test_gate(build.tag, ["cat", "/msg"], "readyok", timeout_s=30)
+    result = run_test_gate(build.tag, ["cat", "/msg"], "readyok", timeout_s=30)
     assert isinstance(result, TestResult)
     assert result.ok is True
     assert "readyok" in result.output
 
 
+@pytest.mark.docker
 @pytest.mark.skipif(not DOCKER_AVAILABLE, reason="docker daemon not available")
 def test_test_gate_fails_when_substring_absent():
     df = "FROM alpine:3.20\nRUN echo nope > /msg\nCMD [\"cat\",\"/msg\"]\n"
     build = build_gate(df)
     assert build.ok
-    result = test_gate(build.tag, ["cat", "/msg"], "readyok", timeout_s=30)
+    result = run_test_gate(build.tag, ["cat", "/msg"], "readyok", timeout_s=30)
     assert result.ok is False
 
 
+@pytest.mark.docker
 @pytest.mark.skipif(not DOCKER_AVAILABLE, reason="docker daemon not available")
 def test_annotate_one_happy_path_flask_smoke():
     df = """FROM python:3.12-slim

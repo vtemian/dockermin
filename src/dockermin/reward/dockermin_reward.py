@@ -2,7 +2,7 @@
 from __future__ import annotations
 from .prompts import extract_dockerfile
 from .gates import compute_score
-from dockermin.dataset.annotate import parse_gate, build_gate, test_gate
+from dockermin.dataset.annotate import parse_gate, build_gate, run_test_gate
 
 
 def _completion_text(completion) -> str:
@@ -31,7 +31,7 @@ def dockermin_reward(completion, info, **kwargs) -> float:
                              command_count=p.command_count,
                              baseline_size=info["baseline_size"],
                              new_size=0, dockerfile_text=new_df)
-    t = test_gate(b.tag, info["test_cmd"], info.get("expected_substring", ""), timeout_s=30)
+    t = run_test_gate(b.tag, info["test_cmd"], info.get("expected_substring", ""), timeout_s=30)
     return compute_score(
         parse_ok=True, build_ok=True, test_ok=t.ok,
         command_count=p.command_count,
