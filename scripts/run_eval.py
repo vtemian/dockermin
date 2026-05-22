@@ -16,12 +16,6 @@ import sys
 from pathlib import Path
 
 from datasets import load_dataset
-from tenacity import (
-    retry,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_exponential,
-)
 from tqdm import tqdm
 
 # Importing baselines registers qwen/gpt4o/sonnet/hadolint/slim/manual/dockermin.
@@ -48,19 +42,9 @@ def _load_holdout(repo_id: str) -> list[dict]:
     return [train[i] for i in range(start, n)]
 
 
-# Tenacity policy: retry on transient network/api errors. We deliberately do NOT
-# retry on docker build/test failures (those are real signal).
-_TRANSIENT = (ConnectionError, TimeoutError, OSError)
-
-
-@retry(
-    reraise=True,
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=2, min=2, max=30),
-    retry=retry_if_exception_type(_TRANSIENT),
-)
-def _run_one_with_retry(baseline: str, triple: dict, **kwargs) -> EvalEntry:
-    return run_one(baseline, triple, **kwargs)
+# Retry policy lives inside the API-only baselines (gpt4o, sonnet_zs) where
+# the only safely-retryable failures occur. Wrapping run_one would also retry
+# expensive docker rebuilds on transient unix-socket hiccups, which we don't want.
 
 
 def main() -> int:
@@ -111,7 +95,7 @@ def main() -> int:
                 if baseline == "dockermin":
                     kwargs["model_id"] = args.dockermin_model
                 try:
-                    entry = _run_one_with_retry(baseline, triple, **kwargs)
+                    entry = run_one(baseline, triple, **kwargs)
                 except Exception as e:  # last-resort: never abort the whole run
                     entry = EvalEntry(
                         baseline=baseline,

@@ -29,9 +29,23 @@ from typing import Any, Callable
 
 import anthropic
 import openai
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from dockermin.dataset.annotate import annotate_one
 from dockermin.reward.prompts import extract_dockerfile, format_messages
+
+
+# Narrow retry policies for the two API-only baselines. Transient connection
+# blips and rate limits are worth a few exponential-backoff retries; docker
+# build/test failures are real signal and must NOT be retried (that's why this
+# lives here and not around ``run_one``).
+_OPENAI_TRANSIENT = (openai.APIConnectionError, openai.RateLimitError)
+_ANTHROPIC_TRANSIENT = (anthropic.APIConnectionError, anthropic.RateLimitError)
 
 
 # ---------------------------------------------------------------------------
@@ -151,13 +165,25 @@ def baseline_qwen_zero_shot(triple: dict) -> EvalEntry:
 # Baseline 2: GPT-4o zero-shot
 # ---------------------------------------------------------------------------
 
+@retry(
+    reraise=True,
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=2, min=2, max=30),
+    retry=retry_if_exception_type(_OPENAI_TRANSIENT),
+)
+def _openai_chat(client, **kwargs):
+    """Narrow retry wrapper for OpenAI chat completions."""
+    return client.chat.completions.create(**kwargs)
+
+
 def baseline_gpt4o(triple: dict) -> EvalEntry:
     t0 = time.perf_counter()
     try:
         msgs = format_messages(triple["dockerfile"], triple["test_cmd"],
                                triple.get("expected_substring", ""))
         client = openai.OpenAI()
-        resp = client.chat.completions.create(
+        resp = _openai_chat(
+            client,
             model="gpt-4o-2024-11-20",
             messages=msgs,
             temperature=0.2,
@@ -176,6 +202,17 @@ def baseline_gpt4o(triple: dict) -> EvalEntry:
 # Baseline 3: Claude Sonnet 4.6 zero-shot
 # ---------------------------------------------------------------------------
 
+@retry(
+    reraise=True,
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=2, min=2, max=30),
+    retry=retry_if_exception_type(_ANTHROPIC_TRANSIENT),
+)
+def _anthropic_messages(client, **kwargs):
+    """Narrow retry wrapper for Anthropic messages.create."""
+    return client.messages.create(**kwargs)
+
+
 def baseline_sonnet_zero_shot(triple: dict) -> EvalEntry:
     t0 = time.perf_counter()
     try:
@@ -185,7 +222,8 @@ def baseline_sonnet_zero_shot(triple: dict) -> EvalEntry:
         system = next((m["content"] for m in msgs if m["role"] == "system"), "")
         chat = [m for m in msgs if m["role"] != "system"]
         client = anthropic.Anthropic()
-        resp = client.messages.create(
+        resp = _anthropic_messages(
+            client,
             model="claude-sonnet-4-6",
             system=system,
             messages=chat,
