@@ -1,9 +1,12 @@
 # configs/dockermin_pilot.toml
+# Schema verified against prime-rl examples/alphabet_sort/rl.toml on
+# 2026-05-22. LoRA goes under [trainer.model.lora]; max_lora_rank
+# auto-propagates to [inference] via auto_setup_lora (PR #1392 merged
+# 2025-12-07). Top-level keys per prime-rl rl.toml convention.
 max_steps = 50
 batch_size = 8
 rollouts_per_example = 8
 learning_rate = 5e-6
-lora_alpha = 64
 oversampling_factor = 1.5
 max_async_level = 2
 trajectory_strategy = "interleaved"
@@ -13,14 +16,21 @@ max_tokens = 1024
 temperature = 1.0
 
 [[env]]
-id = "dockermin"
+# Verifiers resolves env_id -> module via package_module_name(env_id),
+# which maps "dockermin-env" -> "dockermin_env" (our installed module name).
+id = "dockermin-env"
 
 [model]
 name = "Qwen/Qwen2.5-Coder-7B-Instruct"
-max_lora_rank = 32
 
-[model.experimental]
-lora = true
+[trainer.model.lora]
+rank = 32
+alpha = 64
+
+# NCCL weight broadcast does not support LoRA (still disallowed even
+# after PR #1392). Use filesystem broadcast.
+[trainer.weight_broadcast]
+type = "filesystem"
 
 [wandb]
 project = "dockermin"
