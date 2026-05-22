@@ -1,92 +1,89 @@
-# Weekend 1 Saturday runbook
+# Weekend 1 Saturday runbook (v2, updated 2026-05-22 late evening)
 
-Goal of the day: prove the stack works end-to-end on a trivial problem before touching Dockerfiles. If the stack does not run cleanly by lunch, the weekend is at risk and we reassess.
+Goal of the day: prove the stack works end-to-end on the pod before paying for big compute. The code is already written and tested locally (25/25 pytest green on darwin with Docker Desktop). Today's work is **deploy, validate, smoke-test**, not implement.
 
 ## Pre-flight (do before opening the laptop)
 
 - [ ] Coffee
 - [ ] Phone on do-not-disturb, no Opnble, no Twitter
-- [ ] `~/projects/dd/tools/focus-blocker/focus-blocker.sh on` (optional)
 
 ## Phase 0: credentials (10 min, no GPU spend)
 
-- [ ] Open https://app.primeintellect.ai, create account if needed
-- [ ] Generate API key, save to `.env` as `PRIME_INTELLECT_API_KEY=...`
-- [ ] Confirm billing setup. Set a soft cap reminder in your head: $200 = pause and verify pilot signal
-- [ ] Fill remaining `.env` fields: `HF_TOKEN`, `WANDB_API_KEY`, `ANTHROPIC_API_KEY`
+- [ ] Open https://app.primeintellect.ai, create account, generate API key
 - [ ] `cd /Users/whitemonk/projects/ai/dockermin && cp .env.example .env && $EDITOR .env`
-- [ ] Verify `.env` is gitignored (`git check-ignore .env` should print `.env`)
+- [ ] Fill: `PRIME_INTELLECT_API_KEY`, `HF_TOKEN`, `WANDB_API_KEY`, `ANTHROPIC_API_KEY`
+- [ ] `git check-ignore .env` should print `.env` (confirm it stays out of git)
 
-## Phase 1: rent H100 and bring up env (45 min, $1.49/hr starts now)
+## Phase 1: rent H100, install, validate (60 min, ~$2 spend)
 
-- [ ] Prime Intellect dashboard, "Pods" or "On-demand" tab, select 1xH100 80GB SXM
-- [ ] Note rental start time in `docs/cost_log.md` (create the file)
-- [ ] SSH in
-- [ ] `python3.11 -m venv .venv && source .venv/bin/activate`
-- [ ] Clone this repo
-- [ ] `pip install -e .` (will install pinned deps from pyproject.toml)
-- [ ] `wandb login` with key from `.env`
-- [ ] `huggingface-cli login` with HF_TOKEN
+- [ ] `prime availability --gpu-type H100_80GB --gpu-count 1` to find a provider
+- [ ] `prime pods create --gpu-type H100_80GB --gpu-count 1 --provider <id>`
+- [ ] SSH in, `git clone git@github.com:vtemian/dockermin.git`
+- [ ] On pod: `make install` (Makefile target installs deps including prime-rl)
+- [ ] `wandb login` and `huggingface-cli login`
 
-**Checkpoint:** `python -c "import verifiers, vllm, torch, peft, trl; print(verifiers.__version__, vllm.__version__, torch.__version__)"`
-Expected: `0.1.4 0.7.3 2.5.x` with no traceback.
+**Checkpoint A:** `python -c "import verifiers, vllm, peft, prime_rl; print('OK')"` returns OK.
 
-If deps fail to resolve: STOP. Open Prime Intellect Discord support channel. Do not debug for more than 30 min before escalating. This is the cheap kill criterion.
+**Checkpoint B (verified-Saturday items from docs/research_findings_2026-05-22.md):**
+- [ ] `cd /path/to/prime-rl && git log --oneline | grep 91182b7` confirms PR #1392 fix is in HEAD
+- [ ] `python -c "from prime_rl.configs import RLConfig; RLConfig.from_toml('configs/dockermin_pilot.toml')"` validates the config schema. If it fails, diff against `prime-rl/examples/alphabet_sort/rl.toml` and fix.
+- [ ] `cd prime_env/dockermin_env && pip install -e . && python -c "import dockermin_env; print('module OK')"` confirms the verifiers Environment package installs and imports.
 
-## Phase 2: GSM8K smoke test (90 min)
+If any checkpoint fails, STOP. Do not burn more GPU time debugging silently. Ping the Prime Intellect Discord support channel or fall back to a known-good prior commit.
 
-This proves verifiers + vLLM + LoRA serving + wandb all work. Reference: https://verifiers.readthedocs.io/en/latest/components.html
+## Phase 2: LoRA hotswap risk check (30 min on the same 1xH100, ~$0.75)
 
-- [ ] Clone https://github.com/PrimeIntellect-ai/verifiers somewhere outside the dockermin repo
-- [ ] Find the GSM8K example (likely `examples/gsm8k/` or in the README)
-- [ ] Adapt it minimally: use Qwen 2.5 Coder 7B Instruct as the base model (not whatever they default to). LoRA config: r=32, alpha=64, modules per plan.
-- [ ] Run for 10-20 steps only. Watch wandb.
+- [ ] `python scripts/smoke_lora_hotswap.py`
 
-**Checkpoint:** Reward curve trends up (does not need to converge, just needs to move). vLLM serves rollouts. No CUDA OOM. wandb logs reward, loss, kl. Adapter saves every N steps.
+Expected: prints `PASS: base != A != B, A reproducible after swap`. Latencies: base ~3s first call, a1 first load ~500ms, a2 (warm swap) <100ms.
 
-If reward is flat or NaN after 20 steps with the default GSM8K config: something is wired wrong. Do not proceed to Dockermin reward.
+Hard exit: any FAIL print, OR swap latency > 1s. If fails, file vllm issue with repro, and fall back to NCCL weight-broadcast (slower training but known-good).
 
-## Phase 3: LoRA hotswap risk check (45 min)
+## Phase 3: alphabet_sort smoke (60 min on 1xH100, ~$1.50)
 
-This is the highest-risk-not-yet-verified piece. If hotswap is broken with vllm 0.7.3 + Qwen 7B, the whole pipeline is dead.
+Sanity-check that prime-rl + verifiers + LoRA hotswap all wire together end-to-end on a known task before pointing them at our dockermin reward.
 
-Test:
-- [ ] Train two distinct tiny LoRAs (rank 16, 30 steps each, different seeds)
-- [ ] Bring up vLLM with `enable_lora=True max_loras=4 max_lora_rank=32`
-- [ ] Call OpenAI-compat endpoint with `extra_body={"lora_request": adapter_A}` on a prompt
-- [ ] Same prompt with `lora_request": adapter_B`
-- [ ] Confirm completions differ (they should, with two different LoRAs)
-- [ ] Time the swap. Plan says sub-ms; verify <100ms in practice
+- [ ] `prime env install primeintellect/alphabet-sort`
+- [ ] `uv run rl @ <prime-rl>/examples/alphabet_sort/rl.toml --model.experimental.lora --model.max_lora_rank 32 --wandb.project dockermin --wandb.name alphabet-sort-smoke`
 
-If swap silently uses one adapter regardless of which was requested, or swap takes >1s, file an issue with verifiers/vllm immediately and decide whether to wait for fix or fall back to no-hotswap mode (kills async overlap, doubles training time).
+Watch wandb. Expected: reward climbs above 0.5 by step 50. If flat at 30, kill and debug.
 
-## Phase 4: shutdown and log (10 min)
+## Phase 4: shutdown + log (10 min)
 
-- [ ] Terminate the H100 pod (do not leave it running)
-- [ ] Log spend in `docs/cost_log.md`
-- [ ] `git add docs/ && git commit -m "weekend 1 sat: smoke tests passed"`
-- [ ] Push to github
+- [ ] `prime pods terminate <pod_id>`
+- [ ] Update `docs/cost_log.md` with start/end/hours/cost
+- [ ] 3-line journal entry: what worked, what broke, what was not obvious
 
-## Hard exit triggers for the day
-
-- Deps do not resolve, 30 min escalation window past: STOP, ping Prime Intellect support, do not spend more compute today
-- GSM8K reward flat after 20 steps with default config: STOP, debug locally, do not run any further GPU steps
-- LoRA hotswap broken: file issue, decide async fallback, do not start Sunday on dataset until decision is made
+Pod down by lunch. Total spend Saturday: ~$5.
 
 ## What you are NOT doing today
 
-- Writing the dockermin reward function (Sunday afternoon)
-- Scraping Dockerfiles (Sunday morning)
-- Touching docker daemon on training node (Sunday or weekend 2)
-- Synthetic variant generation via Claude API (weekend 2)
+- Curating the full dataset (Sunday)
+- Writing reward function (already written, tested)
+- Building dataset annotator (already written, tested)
+- Implementing baselines (already written)
 
-Stay narrow today. Today is just "does the framework work."
+If you finish Phase 4 by lunch with all checkpoints green, you have a green light to start Sunday's dataset work immediately.
 
-## Dinner check-in
+## Sunday preview
 
-By 8pm, write 3 lines in `docs/journal.md`:
-- What worked
-- What broke
-- What you learned that was not obvious
+- Bulk-annotate the 235 candidates already in `data/raw/candidates.jsonl` (regenerate on pod if needed). Expect ~30-50 working triples from official-images Dockerfiles that don't need build context.
+- Run `scripts/synthetic_variants.py` to generate 5 unoptimized variants per working base via Sonnet 4.6 (~$2 API). Yields 100-250 triples total.
+- Push to HF as `vladtemian/dockermin-v0`.
+- 50-step pilot GRPO run on the curated set, watch wandb.
 
-If by dinner none of the phases passed, weekend 1 Saturday is over. Sleep on it. We reassess Sunday morning.
+## What we already verified Friday night (locally)
+
+- 25/25 pytest pass with Docker Desktop on darwin (M-series Mac)
+- `docker buildx build` subprocess pipeline working
+- prime-rl TOML schema verified against alphabet_sort example
+- PR #1392 confirmed merged at SHA 91182b7
+- verifiers entry-point resolution is by module name; env_id "dockermin-env" maps to `dockermin_env` module
+- `dockerfile.GoParseError` symbol confirmed stable in v3.3.1
+
+## Hard exit triggers for the day
+
+- Phase 1 deps install fails, 30 min escalation past: STOP
+- Phase 2 LoRA hotswap shows FAIL: STOP, file issue
+- Phase 3 alphabet_sort reward flat at step 30: STOP, debug locally before more GPU
+- Cumulative spend > $20: STOP and verify no leaks
