@@ -1,0 +1,70 @@
+Makefile target verification — 2026-05-22
+Runner: bot (cleanup pass alongside M4/M7 fixes)
+Venv: .venv/ (python3.11.0)
+
+Summary
+-------
+help          PASS
+install-light PASS  (re-installed editable dockermin; no errors)
+test          PASS  (25 passed in 3.83s)
+test-pure     PASS  (20 passed, 5 deselected; docker-gated tests skipped)
+lint          FAIL  (29 pre-existing ruff errors across the repo)
+fmt           N/A   (`make fmt` runs ruff format in-place; ran `ruff format --check`
+                    instead per instructions — 23 files would be reformatted)
+
+Per-target notes
+----------------
+
+help
+    `awk` table prints all 13 documented targets with descriptions. OK.
+
+install-light
+    `pip install pytest dockerfile docker tqdm tenacity huggingface_hub anthropic
+    openai datasets` + `pip install --no-deps -e .` — both completed.
+    Re-installed dockermin 0.0.1 editable. Note: this target deliberately omits
+    dev extras (ruff, pytest extras, ipython); see `lint`/`fmt` below.
+
+test
+    `.venv/bin/pytest tests/ -v` → 25 passed in 3.83s. All gates, prompts,
+    annotate, reward, and the M4-updated upper-bound test pass.
+
+test-pure
+    `.venv/bin/pytest tests/ -v -m "not docker"` → 20 passed, 5 deselected.
+    The 5 deselected are the docker-daemon-gated build/annotate tests
+    (test_build_gate_* and test_annotate_one_happy_path_*).
+
+lint
+    `.venv/bin/ruff check src tests scripts` initially FAILED because
+    install-light does NOT include ruff (it's in the `[dev]` extra).
+    After `pip install ruff` to make verification possible:
+        Found 29 errors. 11 auto-fixable.
+    Categories (all pre-existing, unrelated to M4/M7):
+        - E401 multiple imports on one line (audit_rollouts.py, cli.py,
+          smoke_lora_hotswap.py, others)
+        - E701/E702 multiple statements on one line (gates.py shape rules,
+          audit_rollouts.py try/except, smoke_lora_hotswap.py)
+        - E722 bare except (audit_rollouts.py)
+        - F401 unused imports (annotate.py: os; baselines.py: os, docker;
+          conftest.py: pytest; test_prompts.py: SYSTEM_PROMPT, USER_TEMPLATE;
+          synthetic_variants.py / smoke_lora_hotswap.py imports)
+    No source change made — `lint` is informational and the Makefile is not
+    to be modified per task constraints. Two follow-ups worth noting for Vlad:
+        (a) Either move `ruff` into install-light deps, or add a `lint-install`
+            helper, so `make lint` works after a fresh `make install-light`.
+        (b) Run `ruff check --fix` once on a clean branch to clear the 11
+            auto-fixable items; the rest are stylistic and intentional.
+
+fmt
+    `make fmt` would invoke `ruff format src tests scripts` in-place. To honor
+    "do not commit fmt changes" I ran `ruff format --check` instead:
+        23 files would be reformatted, 6 files already formatted
+    Reformat candidates include every script and most src/ files. The diff is
+    almost entirely whitespace/line-length, nothing semantic. Not applied.
+
+Conclusions
+-----------
+- help / install-light / test / test-pure all work as documented.
+- lint and fmt depend on ruff which is in the `[dev]` extra but NOT in
+  install-light. This is the only verified gap. The Makefile itself is fine.
+- No targets requiring GPU / HF token were exercised (scrape, annotate,
+  smoke-reward, leaderboard, venv, install, clean).
