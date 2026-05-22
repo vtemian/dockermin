@@ -1,0 +1,35 @@
+# configs/dockermin_pilot.toml
+max_steps = 50
+batch_size = 8
+rollouts_per_example = 8
+learning_rate = 5e-6
+lora_alpha = 64
+oversampling_factor = 1.5
+max_async_level = 2
+trajectory_strategy = "interleaved"
+
+[sampling]
+max_tokens = 1024
+temperature = 1.0
+
+[[env]]
+id = "dockermin"
+
+[model]
+name = "Qwen/Qwen2.5-Coder-7B-Instruct"
+max_lora_rank = 32
+
+[model.experimental]
+lora = true
+
+[wandb]
+project = "dockermin"
+name = "pilot-50step"
+entity = "vladtemian"
+
+[checkpoints]
+interval = 25
+keep_cloud = 2
+
+[infrastructure]
+compute_size = "S"
