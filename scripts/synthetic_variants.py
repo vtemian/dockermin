@@ -23,8 +23,11 @@ Cost: ~$0.02 per variant via Sonnet 4.6. 5 variants/base x 20 bases ~$2.
 from __future__ import annotations
 
 import argparse
+import atexit
+import fcntl
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import time
@@ -32,6 +35,27 @@ from pathlib import Path
 
 from dockermin.dataset.annotate import annotate_one
 from dockermin.reward.prompts import extract_dockerfile
+
+
+def acquire_lock(path: str) -> int:
+    """Acquire an exclusive flock on path. Exit with code 1 if held."""
+    fd = os.open(path, os.O_CREAT | os.O_WRONLY, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        try:
+            with open(path) as f:
+                holder = f.read().strip()
+            print(f"already running (lockfile {path} held by pid {holder})", file=sys.stderr)
+        except Exception:
+            print(f"already running (lockfile {path} held)", file=sys.stderr)
+        sys.exit(1)
+    os.ftruncate(fd, 0)
+    os.write(fd, f"{os.getpid()}\n".encode())
+    os.fsync(fd)
+    # Keep fd open for the lifetime of the process; closing releases the lock.
+    atexit.register(lambda: os.close(fd))
+    return fd
 
 
 SYSTEM_PROMPT = (
@@ -93,7 +117,11 @@ def main() -> int:
     p.add_argument("--variants-per-base", type=int, default=5)
     p.add_argument("--max-bases", type=int, default=20,
                    help="Cap number of bases (variants_per_base x max_bases = total).")
+    p.add_argument("--lockfile", help="Path to exclusive lockfile to prevent concurrent runs")
     args = p.parse_args()
+
+    if args.lockfile:
+        acquire_lock(args.lockfile)
 
     bases = [json.loads(line) for line in Path(args.in_path).read_text().splitlines()
              if line.strip()]
