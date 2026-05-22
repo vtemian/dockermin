@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+import sys
 import time
 import urllib.request
 from dataclasses import dataclass
@@ -280,7 +281,16 @@ def fetch_github_search(limit: int = 100) -> Iterable[Candidate]:
         "-f", "q=filename:Dockerfile language:Dockerfile size:<5000",
         "-F", "per_page=100",
     ]
-    out = subprocess.check_output(cmd, text=True)
+    try:
+        out = subprocess.check_output(cmd, text=True, stderr=subprocess.PIPE)
+    except subprocess.CalledProcessError as e:
+        # gh exits non-zero on auth failures, rate-limit, or 422 query errors.
+        # Surface stderr to the caller and stop iterating; we don't want a
+        # half-written shard or a hard crash deep in the pipeline.
+        stderr = (e.stderr or "").strip() if isinstance(e.stderr, str) else ""
+        print(f"warning: gh api search/code failed (rc={e.returncode}): {stderr}",
+              file=sys.stderr)
+        return
     time.sleep(GH_SLEEP_S)
     payload = json.loads(out)
     items = payload.get("items", []) if isinstance(payload, dict) else []
