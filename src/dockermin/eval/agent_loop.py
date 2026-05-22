@@ -1,9 +1,10 @@
 """Claude Code headless agent-loop baseline.
 
 Sonnet 4.6 driven via ``claude -p`` with a docker-build / docker-run bash
-allowlist. Up to 5 turns, $0.50 budget per Dockerfile. The agent edits
-``./Dockerfile`` in place; we read the final state back and verify with
-``annotate_one``.
+allowlist. Budget-bounded at $0.50 per Dockerfile (no native --max-turns
+flag in this Claude Code version; budget cap + 600s timeout are the bounds).
+The agent edits ``./Dockerfile`` in place inside a temp dir made accessible
+via ``--add-dir``; we read the final state back and verify with annotate.
 """
 from __future__ import annotations
 
@@ -23,12 +24,14 @@ from dockermin.eval.baselines import (
 
 
 def run_agent_loop(dockerfile: str, test_cmd: list[str], expected: str,
-                   max_turns: int = 5) -> dict:
+                   budget_usd: float = 0.50, timeout_s: int = 600) -> dict:
     """Drive Claude Code headless to optimize a single Dockerfile.
 
     Returns a dict with the final Dockerfile text and run metadata
-    (cost_usd, turns, exit_code). The caller is responsible for verifying the
-    rewritten Dockerfile builds and tests pass.
+    (cost_usd, turns, exit_code). Caller verifies build+test downstream.
+
+    Note: this version of claude CLI does not expose --max-turns. We rely
+    on --max-budget-usd and the subprocess timeout to bound work.
     """
     workdir = Path(tempfile.mkdtemp(prefix="agentloop_"))
     (workdir / "Dockerfile").write_text(dockerfile)
@@ -36,8 +39,9 @@ def run_agent_loop(dockerfile: str, test_cmd: list[str], expected: str,
         f"Optimize ./Dockerfile to be smaller. Build it with docker build. "
         f"Verify test_cmd passes inside the built image: {' '.join(test_cmd)} "
         f"should output a string containing {expected!r}. "
-        f"Iterate up to {max_turns} times. Stop when both: image is smaller "
-        f"than original AND test passes."
+        f"Stop when both: image is smaller than original AND test passes. "
+        f"You have a USD budget cap; do not waste turns once you have a "
+        f"working smaller image."
     )
     try:
         result = subprocess.run(
@@ -45,16 +49,16 @@ def run_agent_loop(dockerfile: str, test_cmd: list[str], expected: str,
                 "claude", "-p", prompt,
                 "--output-format", "json",
                 "--model", "claude-sonnet-4-6",
-                "--max-turns", str(max_turns),
-                "--max-budget-usd", "0.50",
+                "--max-budget-usd", str(budget_usd),
                 "--permission-mode", "bypassPermissions",
+                "--add-dir", str(workdir),
                 "--allowedTools",
-                "Bash(docker build *)", "Bash(docker run *)", "Read", "Edit", "Write",
-                "--cwd", str(workdir),
+                "Bash(docker build *),Bash(docker run *),Read,Edit,Write",
             ],
+            cwd=str(workdir),
             capture_output=True,
             text=True,
-            timeout=600,
+            timeout=timeout_s,
         )
         meta = json.loads(result.stdout) if result.returncode == 0 else {}
         final_df = (workdir / "Dockerfile").read_text()
@@ -63,6 +67,7 @@ def run_agent_loop(dockerfile: str, test_cmd: list[str], expected: str,
             "cost_usd": meta.get("total_cost_usd", 0),
             "turns": meta.get("num_turns", 0),
             "exit_code": result.returncode,
+            "stderr_tail": result.stderr[-500:] if result.stderr else "",
         }
     finally:
         shutil.rmtree(workdir, ignore_errors=True)

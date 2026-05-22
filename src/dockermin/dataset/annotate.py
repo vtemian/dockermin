@@ -2,12 +2,15 @@
 from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
-import io
+import os
+import subprocess
+import tempfile
 import time
+from pathlib import Path
 
 import dockerfile
 import docker
-from docker.errors import BuildError, APIError
+from docker.errors import APIError
 
 MIN_COMMANDS = 2
 
@@ -62,24 +65,52 @@ def parse_gate(df_text: str) -> ParseResult:
     return ParseResult(ok=True, command_count=len(cmds))
 
 
-def build_gate(df_text: str, timeout_s: int = 300) -> BuildResult:
-    """Build the Dockerfile and return image size. Uses the classic builder via SDK (no BuildKit)."""
-    client = _docker_client()
+def build_gate(df_text: str, timeout_s: int = 300,
+               builder: str | None = None, cache_dir: str | None = None) -> BuildResult:
+    """Build the Dockerfile via `docker buildx build` and return image size.
+
+    BuildKit hot-path so apt/pip/npm cache mounts amortize across rollouts.
+    Subprocess timeout actually kills the build on the wall clock (the
+    docker SDK `timeout` is only an HTTP idle timeout - a stuck RUN keeps
+    streaming logs and never trips it).
+
+    The temp build context is empty other than the Dockerfile; rollout
+    Dockerfiles must be self-contained (FROM + RUN + CMD). Curation
+    candidates that depend on a build context need explicit handling.
+
+    Args:
+      builder: optional named buildx builder (default uses current).
+      cache_dir: optional local cache path for --cache-from / --cache-to.
+        On the pod this points at /scratch/bkcache for cross-rollout reuse.
+    """
     digest = hashlib.sha256(df_text.encode()).hexdigest()[:12]
     tag = f"dockermin/curate:{digest}"
     t0 = time.perf_counter()
-    try:
-        image, log_stream = client.images.build(
-            fileobj=io.BytesIO(df_text.encode()),
-            tag=tag, rm=True, forcerm=True, timeout=timeout_s,
-        )
-        # Drain the log stream so the http connection isn't held.
-        for _ in log_stream:
-            pass
-    except (BuildError, APIError) as e:
-        return BuildResult(ok=False, error=f"build error: {e}")
+    with tempfile.TemporaryDirectory(prefix="bldctx_") as ctx:
+        ctx_path = Path(ctx)
+        (ctx_path / "Dockerfile").write_text(df_text)
+        cmd = ["docker", "buildx", "build", "--load", "-t", tag,
+               "-f", str(ctx_path / "Dockerfile")]
+        if builder:
+            cmd += ["--builder", builder]
+        if cache_dir:
+            cmd += [
+                "--cache-from", f"type=local,src={cache_dir}",
+                "--cache-to", f"type=local,dest={cache_dir},mode=max",
+            ]
+        cmd.append(str(ctx_path))
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s)
+        except subprocess.TimeoutExpired:
+            return BuildResult(ok=False, error=f"build timeout after {timeout_s}s")
+        if proc.returncode != 0:
+            return BuildResult(ok=False,
+                               error=f"buildx rc={proc.returncode}: {proc.stderr[-400:]}")
     elapsed = time.perf_counter() - t0
-    size = client.images.get(tag).attrs["Size"]
+    try:
+        size = _docker_client().images.get(tag).attrs["Size"]
+    except APIError as e:
+        return BuildResult(ok=False, error=f"image inspect failed: {e}")
     return BuildResult(ok=True, tag=tag, size_bytes=size, build_seconds=elapsed)
 
 
@@ -87,7 +118,14 @@ def run_test_gate(tag: str, cmd: list[str], expected_substring: str, timeout_s: 
     """Run cmd inside the image, capture combined output, match expected substring.
 
     Renamed from test_gate to avoid pytest auto-collection.
+
+    Defense in depth: an empty expected_substring makes the test trivially
+    pass (``"" in anything == True``). That is a reward-hacking surface
+    if a triple slipped through with no expectation. Reject at the gate.
     """
+    if not expected_substring:
+        return TestResult(ok=False,
+                          error="empty expected_substring would trivially pass; refuse")
     client = _docker_client()
     try:
         container = client.containers.run(
@@ -120,15 +158,22 @@ def run_test_gate(tag: str, cmd: list[str], expected_substring: str, timeout_s: 
 
 
 def annotate_one(df_text: str, test_cmd: list[str], expected_substring: str,
-                 build_timeout_s: int = 300, test_timeout_s: int = 30) -> AnnotateResult:
+                 build_timeout_s: int = 300, test_timeout_s: int = 30,
+                 builder: str | None = None, cache_dir: str | None = None) -> AnnotateResult:
     p = parse_gate(df_text)
     if not p.ok:
         return AnnotateResult(ok=False, error=p.error)
-    b = build_gate(df_text, timeout_s=build_timeout_s)
+    b = build_gate(df_text, timeout_s=build_timeout_s,
+                   builder=builder, cache_dir=cache_dir)
     if not b.ok:
         return AnnotateResult(ok=False, error=b.error)
     t = run_test_gate(b.tag, test_cmd, expected_substring, timeout_s=test_timeout_s)
     if not t.ok:
+        # Best-effort cleanup of the tagged image so the disk doesn't fill.
+        try:
+            _docker_client().images.remove(b.tag, force=True)
+        except Exception:
+            pass
         return AnnotateResult(ok=False, error=t.error)
     return AnnotateResult(ok=True, baseline_size=b.size_bytes,
                           baseline_build_s=b.build_seconds, tag=b.tag)
@@ -142,7 +187,12 @@ def infer_test_cmd(df_text: str) -> tuple[list[str] | None, str | None]:
     if "from node" in text or "npm install" in text:
         return (["node", "-e", "console.log('ok',process.version)"], "ok")
     if "from golang" in text or "go build" in text:
-        return (["/app/server", "--version"], "")
+        # /app/server is a guess; we cannot give an empty expected (reward
+        # hacking surface) so drop the triple if we cannot verify. The bulk
+        # annotator will skip these without a meaningful test.
+        return (None, None)
     if "from openjdk" in text or "from eclipse-temurin" in text:
-        return (["java", "-version"], "")
+        # java -version writes to stderr; the openjdk/temurin runtime always
+        # prints a line starting with "openjdk" or "OpenJDK". Match on that.
+        return (["java", "-version"], "openjdk")
     return (None, None)
