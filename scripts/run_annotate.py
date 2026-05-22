@@ -1,16 +1,24 @@
-"""Bulk-annotate candidates.jsonl into curated/triples.jsonl, dropping non-passing."""
+"""Bulk-annotate candidates.jsonl into curated/triples.jsonl, dropping non-passing.
+
+Writes a fresh per-run output file (so we can re-run safely without clobbering
+the curated set while another consumer is reading it), then atomically merges
+into the curated triples on success. Dedup is on the candidate id.
+"""
 from __future__ import annotations
 
+import argparse
 import json
+import os
+import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from dockermin.dataset.annotate import annotate_one, infer_test_cmd
 
-IN = Path("data/raw/candidates.jsonl")
-OUT = Path("data/curated/triples.jsonl")
+DEFAULT_IN = Path("data/raw/candidates.jsonl")
+DEFAULT_OUT = Path("data/curated/triples.jsonl")
 TARGET = 200
-MAX_WORKERS = 8
+MAX_WORKERS = 4
 
 
 def process(rec: dict) -> dict | None:
@@ -36,11 +44,60 @@ def process(rec: dict) -> dict | None:
     }
 
 
+def _merge_into_curated(new_triples: list[dict], out_path: Path) -> tuple[int, int, int]:
+    """Merge new triples into out_path, dedup by id, atomic replace.
+
+    Returns (existing, added, total).
+    """
+    existing: list[dict] = []
+    if out_path.exists():
+        with out_path.open() as fin:
+            for line in fin:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    existing.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+    by_id: dict[str, dict] = {r.get("id", ""): r for r in existing}
+    added = 0
+    for t in new_triples:
+        tid = t.get("id", "")
+        if tid not in by_id:
+            added += 1
+        by_id[tid] = t
+    merged = list(by_id.values())
+    tmp = out_path.with_suffix(out_path.suffix + ".tmp")
+    with tmp.open("w") as fout:
+        for r in merged:
+            fout.write(json.dumps(r) + "\n")
+    os.replace(tmp, out_path)
+    return (len(existing), added, len(merged))
+
+
 def main() -> None:
-    OUT.parent.mkdir(parents=True, exist_ok=True)
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--in", dest="in_path", default=str(DEFAULT_IN),
+                    help="input candidates.jsonl path")
+    ap.add_argument("--out", dest="out_path", default=str(DEFAULT_OUT),
+                    help="curated triples.jsonl path (merged into)")
+    ap.add_argument("--workers", type=int, default=MAX_WORKERS)
+    ap.add_argument("--target", type=int, default=TARGET)
+    args = ap.parse_args()
+
+    in_path = Path(args.in_path)
+    out_path = Path(args.out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Per-run scratch file so we never blank the curated file mid-run.
+    scratch = Path(tempfile.mkstemp(prefix="annotate_", suffix=".jsonl",
+                                    dir=str(out_path.parent))[1])
+    print(f"reading {in_path} -> scratch {scratch} (workers={args.workers}, target={args.target})")
+
     seen = 0
-    kept = 0
-    with IN.open() as fin, OUT.open("w") as fout, ThreadPoolExecutor(MAX_WORKERS) as ex:
+    kept_records: list[dict] = []
+    with in_path.open() as fin, scratch.open("w") as fout, ThreadPoolExecutor(args.workers) as ex:
         futures = []
         for line in fin:
             line = line.strip()
@@ -57,11 +114,14 @@ def main() -> None:
             if res:
                 fout.write(json.dumps(res) + "\n")
                 fout.flush()
-                kept += 1
-                print(f"kept {kept}/{TARGET} (seen {seen})")
-                if kept >= TARGET:
+                kept_records.append(res)
+                print(f"kept {len(kept_records)}/{args.target} (seen {seen})")
+                if len(kept_records) >= args.target:
                     break
-    print(f"done: kept {kept} of {seen} candidates")
+    print(f"scratch done: kept {len(kept_records)} of {seen} candidates")
+
+    existing, added, total = _merge_into_curated(kept_records, out_path)
+    print(f"merged into {out_path}: existing={existing} added={added} total={total}")
 
 
 if __name__ == "__main__":
