@@ -1,32 +1,34 @@
 """Generate synthetic 'deliberately unoptimized' Dockerfile variants via Claude.
 
+Uses the locally-installed `claude` CLI (Claude Code) in headless print mode
+rather than the anthropic SDK so we do not need ANTHROPIC_API_KEY in the
+environment - Claude Code handles auth via its own keychain/login.
+
 Strategy: take a small set of working baseline Dockerfiles (the curated
 triples that passed parse + build + test), and have Claude Sonnet 4.6 produce
-N unoptimized variants per base. Each variant should:
-  - keep the same test_cmd + expected_substring (so we can verify equivalence)
-  - introduce realistic bloat patterns the model can learn to undo:
+N unoptimized variants per base. Each variant:
+  - keeps the same test_cmd + expected_substring (functional equivalence)
+  - introduces realistic bloat the model can learn to undo:
     (a) heavier base image (e.g. python:3.12 instead of python:3.12-slim)
     (b) redundant RUN layers (multiple apt-get install lines)
     (c) missing --no-install-recommends / --no-cache-dir
     (d) leftover dev deps
-    (e) verbose CMD/ENTRYPOINT shell-form instead of JSON-form
+    (e) shell-form CMD/ENTRYPOINT instead of JSON-form
 
-Each variant is validated via annotate_one (must build + pass test).
+Each variant validated via annotate_one (must build + pass same test).
 Reward signal during training: rewrite the variant -> smaller working image.
 
-Cost: ~$0.02 per variant via Sonnet 4.6 with prompt caching. 5 variants per
-base x 20 bases = 100 variants ~ $2.
+Cost: ~$0.02 per variant via Sonnet 4.6. 5 variants/base x 20 bases ~$2.
 """
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
+import subprocess
 import sys
 import time
 from pathlib import Path
-
-import anthropic
 
 from dockermin.dataset.annotate import annotate_one
 from dockermin.reward.prompts import extract_dockerfile
@@ -44,24 +46,43 @@ SYSTEM_PROMPT = (
 )
 
 
-def generate_variant(client: anthropic.Anthropic, baseline_df: str,
-                     test_cmd: list[str], expected: str,
-                     variant_seed: int) -> str | None:
+def generate_variant(baseline_df: str, test_cmd: list[str], expected: str,
+                     variant_seed: int, budget_usd: float = 0.20,
+                     timeout_s: int = 120) -> str | None:
+    """Drive `claude -p` headless to produce a single variant Dockerfile.
+
+    Cost note: Claude Code's default system prompt + tool defs trigger
+    ~25k cache_creation tokens per session start. Budget per call ~$0.10.
+    --bare would strip this but requires ANTHROPIC_API_KEY in env which
+    we don't have, so we pay the cache cost.
+    """
     user_msg = (
+        f"{SYSTEM_PROMPT}\n\n"
         f"Baseline Dockerfile:\n```dockerfile\n{baseline_df}\n```\n\n"
         f"Test cmd: {' '.join(test_cmd)}\n"
         f"Expected substring: {expected!r}\n\n"
         f"Generate variant #{variant_seed} (try a different bloat pattern "
-        f"than other variants of this base)."
+        f"than other variants of this base). Output ONLY the variant in a "
+        f"single fenced ```dockerfile block."
     )
-    resp = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=2048,
-        system=[{"type": "text", "text": SYSTEM_PROMPT,
-                 "cache_control": {"type": "ephemeral"}}],
-        messages=[{"role": "user", "content": user_msg}],
-    )
-    return extract_dockerfile(resp.content[0].text)
+    cmd = [
+        "claude", "-p", user_msg,
+        "--output-format", "json",
+        "--model", "claude-sonnet-4-6",
+        "--max-budget-usd", str(budget_usd),
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        meta = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return None
+    text = meta.get("result", "") or ""
+    return extract_dockerfile(text)
 
 
 def main() -> int:
@@ -80,7 +101,6 @@ def main() -> int:
     print(f"Generating variants for {len(bases)} baselines, "
           f"{args.variants_per_base} variants each")
 
-    client = anthropic.Anthropic()
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     kept = 0
@@ -91,15 +111,12 @@ def main() -> int:
             fout.write(json.dumps(base) + "\n"); fout.flush()
             kept += 1
             for vi in range(args.variants_per_base):
-                try:
-                    variant_df = generate_variant(
-                        client, base["dockerfile"],
-                        base["test_cmd"], base["expected_substring"], vi)
-                except anthropic.APIError as e:
-                    print(f"  api error: {e!r}"); failed += 1
-                    continue
+                variant_df = generate_variant(
+                    base["dockerfile"], base["test_cmd"],
+                    base["expected_substring"], vi)
                 if variant_df is None:
-                    print("  no fenced dockerfile in response"); failed += 1
+                    print(f"  variant {vi}: claude returned no dockerfile or errored")
+                    failed += 1
                     continue
                 # Validate variant builds + tests
                 res = annotate_one(variant_df, base["test_cmd"],
