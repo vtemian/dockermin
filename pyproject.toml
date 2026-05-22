@@ -7,20 +7,25 @@ requires-python = "==3.11.*"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Vlad Temian", email = "vladtemian@gmail.com" }]
 
-# Pinned per plan section 1. Versions chosen for verifiers + prime-rl + vllm LoRA hotswap compatibility on Prime Intellect Lab (May 2026).
 dependencies = [
-  "verifiers==0.1.4",
+  # prime-rl pulls verifiers, vllm, transformers, peft transitively.
+  # Pinning prime-rl explicitly + leaving verifiers floating to whatever prime-rl needs.
+  "prime-rl",                # exact commit pin set during Task 1.3 once we confirm PR #1392 status
+  "verifiers>=0.1.5",        # 0.1.4 lacks LoRA hotswap glue; prime-rl needs newer
   "vllm==0.7.3",
   "transformers==4.46.*",
   "peft==0.13.*",
-  "trl==0.12.*",
   "torch==2.5.*",
   "accelerate==1.1.*",
   "datasets==3.1.*",
-  "dockerfile==3.3.1",
+  "dockerfile==3.3.1",       # deprecated upstream but works
   "docker==7.1.*",
   "huggingface_hub",
   "wandb",
+  "anthropic",               # synthetic variant generation + Sonnet baseline
+  "openai",                  # GPT-4o baseline
+  "tqdm",
+  "tenacity",                # retry on Docker daemon flakes
 ]
 
 [project.optional-dependencies]
