@@ -2,6 +2,58 @@
 
 Append per session. Last entry at top. 3-5 sentences per entry. What worked, what broke, what was not obvious.
 
+## 2026-05-22 Friday late-late evening (Vlad + Bot, 4-agent verify pass + code review)
+
+Dispatched 4 parallel agents over the parallel-burst code from earlier:
+local venv + pytest, real scrape against GitHub, code review across the
+diff range, Makefile + GitHub Actions CI scaffolding.
+
+Concrete results:
+- Local venv up, 23/23 tests pass (Docker Desktop available on darwin).
+- Scrape pulled 235 candidates after fixing 2 scrape bugs (awesome-compose
+  1-level walk; GitHub code-search `stars:` qualifier doesn't exist there).
+  Was 103 candidates on first run, jumped to 235 after fixes.
+- Code reviewer found 5 critical bugs. Fixed 4 of the 5 tonight:
+  - test_gate function collided with pytest collection -> renamed to
+    run_test_gate
+  - compute_score regex was greedy on \\S+ so tagged images got
+    bare-FROM penalty -> split into two ifs, tightened regex
+  - parse-garbage test expected "parse" error but dockerfile lib is
+    extremely lenient -> use empty input which is the only plain string
+    that triggers GoParseError
+  - agent_loop.py used --max-turns and --cwd flags that DON'T EXIST in
+    this claude build. Replaced with subprocess cwd= + --add-dir +
+    --max-budget-usd as the bound.
+  - empty expected_substring trivially passed test_gate (reward hacking
+    surface). Defense in depth: run_test_gate refuses empty;
+    infer_test_cmd's go fallback drops triple; java uses "openjdk"
+    substring (always present in `java -version` from openjdk images).
+  - replaced docker SDK images.build() with `docker buildx build`
+    subprocess. SDK timeout is HTTP-idle only, doesn't bound build wall
+    clock - a stuck RUN held a worker thread forever. Subprocess timeout
+    actually kills. Bonus: cache-from/cache-to flags actually work now
+    against the docker-container builder created by setup_pod_docker.sh.
+
+5th critical (C3 :latest regex) was already fixed in my previous batch -
+reviewer was running against pre-fix HEAD.
+
+Important / Minor items from review (I1-I8, M1-M7) deferred. Most of
+them are correctness nits or perf tweaks that don't burn budget or
+produce misleading numbers. Worth a Sunday cleanup pass once the pilot
+shows signal.
+
+Ergonomic adds: Makefile with 11 targets + .github/workflows/ci.yml
+running pytest -m "not docker" on push.
+
+At HEAD: github.com/vtemian/dockermin commit fa3ac92.
+- 36 files in src/ + tests/ + scripts/ + configs/ + prime_env/
+- 18 commits total
+- 23/23 tests pass locally
+- 235 raw candidates ready in data/raw/candidates.jsonl
+
+Saturday morning's work has now shifted from "implement + run from
+scratch" to "deploy known-good code on the pod and watch it run."
+
 ## 2026-05-22 Friday late evening (Vlad + Bot, parallel implementation burst)
 
 Dispatched 6 parallel subagents on non-overlapping file sets. All 6 returned clean (AST + TOML validation passed). 2232 lines of code across 29 new files written in roughly 4 minutes of wall-clock. Commits f5d8d9b through 497ad0a cover the reward stack, annotate gates, dataset orchestration, pod ops scripts, eval baselines, and CLI + prime-rl environment package.
