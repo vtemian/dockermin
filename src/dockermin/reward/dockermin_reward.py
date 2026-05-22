@@ -6,13 +6,36 @@ from dockermin.dataset.annotate import parse_gate, build_gate, run_test_gate
 
 
 def _completion_text(completion) -> str:
-    """Verifiers passes completion either as str or list[message]."""
+    """Verifiers passes completion either as str or list[message].
+
+    Assumption: when given a list, we concatenate the ``content`` of every
+    assistant-role message (and any dict without an explicit role) so that
+    multi-block completions (e.g. assistant + tool_use + assistant) are
+    surfaced to ``extract_dockerfile``. Non-string contents are stringified.
+    """
     if isinstance(completion, str):
         return completion
-    if isinstance(completion, list) and completion:
-        last = completion[-1]
-        if isinstance(last, dict):
-            return last.get("content", "")
+    if isinstance(completion, list):
+        parts: list[str] = []
+        for msg in completion:
+            if not isinstance(msg, dict):
+                continue
+            role = msg.get("role", "assistant")
+            if role and role != "assistant":
+                continue
+            content = msg.get("content", "")
+            if isinstance(content, str):
+                parts.append(content)
+            elif isinstance(content, list):
+                # Anthropic-style content blocks: [{type:'text', text:'...'}, ...]
+                for block in content:
+                    if isinstance(block, dict):
+                        text = block.get("text") or block.get("content") or ""
+                        if isinstance(text, str):
+                            parts.append(text)
+            else:
+                parts.append(str(content))
+        return "\n".join(parts)
     return ""
 
 

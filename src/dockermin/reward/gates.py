@@ -30,6 +30,6 @@ def compute_score(*, parse_ok: bool, build_ok: bool, test_ok: bool,
     if re.search(r"^from\s+[^\s:@]+\s*$", text, re.M):
         # bare image reference: no ":tag" and no "@digest" pin
         shape -= 0.05
-    if "from scratch" in text and " copy " not in text:
+    if "from scratch" in text and not re.search(r"\bcopy\b", text):
         shape -= 0.10
     return 0.5 + 0.5 * dense + shape

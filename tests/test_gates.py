@@ -36,6 +36,23 @@ def test_shape_bonus_gated_on_test_pass():
                       dockerfile_text="FROM alpine\nRUN whatever")
     assert s == pytest.approx(0.05)  # NO alpine shape bonus when test failed
 
+def test_from_scratch_with_leading_copy_no_penalty():
+    # Regression: prior implementation matched " copy " with surrounding spaces,
+    # so a leading "COPY app /app" at line start was missed and the -0.10
+    # "from scratch with no COPY" penalty was wrongly applied.
+    df = "FROM scratch\nCOPY app /app\nCMD [\"/app\"]"
+    s_with_copy = compute_score(parse_ok=True, build_ok=True, test_ok=True,
+                                command_count=3, baseline_size=100, new_size=80,
+                                dockerfile_text=df)
+    s_no_copy = compute_score(parse_ok=True, build_ok=True, test_ok=True,
+                              command_count=3, baseline_size=100, new_size=80,
+                              dockerfile_text="FROM scratch\nCMD [\"/x\"]")
+    # The COPY variant must NOT take the -0.10 penalty, so its score is higher.
+    assert s_with_copy > s_no_copy
+    # And specifically: the gap should be ~0.10 (the penalty we avoided).
+    assert s_with_copy - s_no_copy == pytest.approx(0.10, abs=0.001)
+
+
 def test_latest_tag_penalty_applied_when_test_passes():
     s_with = compute_score(parse_ok=True, build_ok=True, test_ok=True,
                            command_count=3, baseline_size=100, new_size=80,
