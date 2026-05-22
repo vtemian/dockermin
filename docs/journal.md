@@ -2,6 +2,33 @@
 
 Append per session. Last entry at top. 3-5 sentences per entry. What worked, what broke, what was not obvious.
 
+## 2026-05-22 Friday very-late evening (Vlad + Bot, data pipeline reality check)
+
+Tried to push the dataset pipeline end-to-end tonight. Mixed result, honest report:
+
+**What worked:**
+- Code-review cleanup (M4, M7), Makefile target verification - clean.
+- Scrape broadened from 235 to 455 candidates (96 safe-to-build).
+- Verified all 3 unknowns against prime-rl source: PR #1392 merged at 91182b7; TOML schema is [trainer.model.lora] not [model.experimental]; verifiers entry-point group is decorative, what matters is module name = package_module_name(env_id) so env_id "dockermin-env" maps to dockermin_env.
+- Updated configs/dockermin_{pilot,full}.toml to match verified schema.
+- synthetic_variants.py manually tested: one call against the flask base produced a beautiful unoptimized variant in 11s (heavier base, redundant RUNs, missing flags, shell-form CMD). Pipeline works.
+- Bulk annotate added 3 triples (11 -> 14) before being killed.
+
+**What broke:**
+- Parallel-agent coordination collapsed under respawning sub-agents. Both the synthetic_variants and run_annotate processes had ghost duplicates (Agent A's command kept being re-spawned by something - probably a parallel claude session or hook loop). Multiple processes wrote to the same output files in "w" mode, corrupting one line of triples_with_variants.jsonl.
+- My pkill pattern to clean up the duplicates also killed my own intended processes. Variant generation produced 0 saved variants.
+
+**Lesson for Saturday:**
+- Run scrape and annotate on the pod with no other claude sessions touching the project tree. The race conditions tonight were not the scripts' fault.
+- Each script needs --in / --out args (already added by Agent B to run_annotate; synthetic_variants.py already accepts --in/--out).
+- Add a `--lockfile` arg or PID-based rendezvous to prevent two instances racing on the same output.
+
+State at sleep:
+- 14 curated triples in data/curated/triples.jsonl (up from 11)
+- 455 candidates in data/raw/candidates.jsonl
+- triples_with_variants.jsonl: 3 bases written, 1 corrupt line, 0 variants (file should be discarded; will regenerate cleanly Saturday)
+- All scaffolding code green: 25/25 pytest pass
+
 ## 2026-05-22 Friday late-late evening (Vlad + Bot, 4-agent verify pass + code review)
 
 Dispatched 4 parallel agents over the parallel-burst code from earlier:
