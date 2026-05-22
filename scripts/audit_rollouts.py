@@ -11,12 +11,15 @@ def audit(rollouts_dir: Path) -> dict:
             try: rollouts.append(json.loads(line))
             except: continue
     sample = random.sample(rollouts, min(20, len(rollouts)))
+    # Normalize to lowercase once so substring checks are case-insensitive
+    # (catches ":LATEST", ":Latest", "Cmd", "EntryPoint", etc.).
+    texts = [r.get("completion", "").lower() for r in sample]
     stats = {
         "n": len(sample),
-        "from_scratch": sum(1 for r in sample if "from scratch" in r.get("completion","").lower()),
-        "latest_tag": sum(1 for r in sample if ":latest" in r.get("completion","")),
-        "no_cmd": sum(1 for r in sample if "CMD" not in r.get("completion","") and "ENTRYPOINT" not in r.get("completion","")),
-        "mean_lines": sum(len(r.get("completion","").splitlines()) for r in sample) / max(1, len(sample)),
+        "from_scratch": sum(1 for t in texts if "from scratch" in t),
+        "latest_tag": sum(1 for t in texts if ":latest" in t),
+        "no_cmd": sum(1 for t in texts if "cmd" not in t and "entrypoint" not in t),
+        "mean_lines": sum(len(t.splitlines()) for t in texts) / max(1, len(sample)),
     }
     return stats
 

@@ -32,4 +32,4 @@ def compute_score(*, parse_ok: bool, build_ok: bool, test_ok: bool,
         shape -= 0.05
     if "from scratch" in text and not re.search(r"\bcopy\b", text):
         shape -= 0.10
-    return 0.5 + 0.5 * dense + shape
+    return min(1.0, 0.5 + 0.5 * dense + shape)

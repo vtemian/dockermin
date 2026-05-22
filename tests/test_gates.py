@@ -27,7 +27,7 @@ def test_compute_score_test_pass_full_reduction_returns_around_one():
     s = compute_score(parse_ok=True, build_ok=True, test_ok=True,
                       command_count=3, baseline_size=100, new_size=10,
                       dockerfile_text="FROM gcr.io/distroless/python3-debian12\nCMD [\"x\"]")
-    assert 0.95 <= s <= 1.10  # 0.5 base + 0.5 * 0.9 reduction + small distroless bonus
+    assert 0.95 <= s <= 1.0  # 0.5 base + 0.5 * 0.9 reduction + small distroless bonus, capped at 1.0
 
 def test_shape_bonus_gated_on_test_pass():
     # Build passes but test fails: NO shape bonus from alpine string
