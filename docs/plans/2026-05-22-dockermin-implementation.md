@@ -110,7 +110,7 @@ git commit -m "scaffold: package layout for dataset, reward, eval, cli"
 git push
 ```
 
-**Checkpoint:** `find src tests -name '*.py' | wc -l` returns 16.
+**Checkpoint:** `find src tests -name '*.py' | wc -l` returns 18 (16 new + 2 pre-existing: `src/dockermin/__init__.py`, `src/dockermin/cli.py`).
 
 ---
 
