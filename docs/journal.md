@@ -2,6 +2,26 @@
 
 Append per session. Last entry at top. 3-5 sentences per entry. What worked, what broke, what was not obvious.
 
+## 2026-05-23 Saturday very-early hours (round 3 - more variants + lockfile rollout + ship templates)
+
+Continued with another wave of agents. Concrete results:
+
+**Bulk annotate round 2:** 96 safe candidates processed -> 12 working triples, 2 NEW (10 dup with existing). triples.jsonl: 14 -> 16 baselines.
+
+**Synthetic variants round 2:** ran with --max-bases 16 against the 16-baseline snapshot. Got an additional 34 variants before background bash timed out. Some bases now have 13 variants (more bloat-pattern diversity than the original 5/base). Final state: 11 bases + 82 variants = 93 entries.
+
+**Combined dataset:** 16 unique baseline Dockerfiles + ~82 unique synthetic variants. About 98 working pairs total, well past the 100 floor for the kill criterion. Saturday on the pod can push higher.
+
+**Hard finds caught locally before the pod:**
+- `prime_env/dockermin_env/pyproject.toml` was missing explicit [tool.setuptools] block. Setuptools flat-layout discovery picked the sibling `dockermin_env.py` as a top-level py_module, making `import dockermin_env` execute the submodule body and bypass __init__.py. Fixed in commit 253ffcf with explicit `packages = ["dockermin_env"]` + `package-dir`. This would have broken verifiers' Environment loading silently on the pod.
+- run_annotate.py and synthetic_variants.py now both have `--lockfile` arg using fcntl.flock to prevent the double-spawn races that corrupted output earlier in the night.
+
+**Ship-phase templates pre-written:**
+- `docs/blog_template.md` (61 lines) - TL;DR, setup, results table placeholder, "things that surprised us", what did not work
+- `docs/NEGATIVE_RESULT_template.md` (36 lines) - if the agent loop wins, this is the writeup
+
+**Still blocked:** HF_TOKEN missing. Vlad needs `huggingface-cli login` or `HF_TOKEN=hf_xxx` in .env before dataset push. Saturday morning task.
+
 ## 2026-05-23 Saturday early hours (variant pipeline completed)
 
 Synthetic variants pipeline ran to completion. 11 bases x 5 variants = 55 attempts. 48 variants kept (~87% pass rate). 7 failures: base 6 lost all 5 (apt-get bloat hit Debian repo dep issues), bases 4 and 9 lost 1 each (deprecated MAINTAINER, OS signals).
