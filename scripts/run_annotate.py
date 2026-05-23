@@ -7,13 +7,37 @@ into the curated triples on success. Dedup is on the candidate id.
 from __future__ import annotations
 
 import argparse
+import atexit
+import fcntl
 import json
 import os
+import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from dockermin.dataset.annotate import annotate_one, infer_test_cmd
+
+
+def acquire_lock(path: str) -> int:
+    """Acquire an exclusive flock on path. Exit with code 1 if held."""
+    fd = os.open(path, os.O_CREAT | os.O_WRONLY, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        try:
+            with open(path) as f:
+                holder = f.read().strip()
+            print(f"already running (lockfile {path} held by pid {holder})", file=sys.stderr)
+        except Exception:
+            print(f"already running (lockfile {path} held)", file=sys.stderr)
+        sys.exit(1)
+    os.ftruncate(fd, 0)
+    os.write(fd, f"{os.getpid()}\n".encode())
+    os.fsync(fd)
+    # Keep fd open for the lifetime of the process; closing releases the lock.
+    atexit.register(lambda: os.close(fd))
+    return fd
 
 DEFAULT_IN = Path("data/raw/candidates.jsonl")
 DEFAULT_OUT = Path("data/curated/triples.jsonl")
@@ -84,7 +108,12 @@ def main() -> None:
                     help="curated triples.jsonl path (merged into)")
     ap.add_argument("--workers", type=int, default=MAX_WORKERS)
     ap.add_argument("--target", type=int, default=TARGET)
+    ap.add_argument("--lockfile", default="logs/run_annotate.lock",
+                    help="exclusive flock path to prevent concurrent runs")
     args = ap.parse_args()
+
+    Path(args.lockfile).parent.mkdir(parents=True, exist_ok=True)
+    acquire_lock(args.lockfile)
 
     in_path = Path(args.in_path)
     out_path = Path(args.out_path)
