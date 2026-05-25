@@ -1,4 +1,5 @@
 """Prompt template and Dockerfile extraction for Dockermin GRPO."""
+
 from __future__ import annotations
 
 import re
@@ -21,17 +22,22 @@ USER_TEMPLATE = (
 
 _FENCE = re.compile(r"```(?:dockerfile|Dockerfile)?\s*\n(.*?)\n```", re.DOTALL)
 
+
 def extract_dockerfile(text: str) -> str | None:
     """Return the first fenced ```dockerfile (or bare ```) block's body, or None."""
     m = _FENCE.search(text)
     return m.group(1).strip() if m else None
 
-def format_messages(dockerfile: str, test_cmd: list[str], expected: str) -> list[dict]:
+
+def format_messages(dockerfile: str, test_cmd: list[str], expected: str) -> list[dict[str, str]]:
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": USER_TEMPLATE.format(
-            dockerfile=dockerfile.strip(),
-            test_cmd=" ".join(test_cmd),
-            expected=expected,
-        )},
+        {
+            "role": "user",
+            "content": USER_TEMPLATE.format(
+                dockerfile=dockerfile.strip(),
+                test_cmd=" ".join(test_cmd),
+                expected=expected,
+            ),
+        },
     ]

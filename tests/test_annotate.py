@@ -1,4 +1,7 @@
 """Tests for the per-Dockerfile annotate() pipeline."""
+
+from __future__ import annotations
+
 import docker
 import pytest
 
@@ -14,23 +17,22 @@ from dockermin.dataset.annotate import (
     run_test_gate,
 )
 
-DOCKER_AVAILABLE = False
 try:
     docker.from_env().ping()
     DOCKER_AVAILABLE = True
-except Exception:
-    pass
+except Exception:  # noqa: BLE001 — probe: any failure means the docker daemon is unavailable, skip docker-gated tests
+    DOCKER_AVAILABLE = False
 
 
-def test_parse_gate_accepts_valid_dockerfile():
-    df = "FROM python:3.12-slim\nRUN pip install flask\nCMD [\"python\",\"-m\",\"flask\",\"run\"]"
+def test_parse_gate_accepts_valid_dockerfile() -> None:
+    df = 'FROM python:3.12-slim\nRUN pip install flask\nCMD ["python","-m","flask","run"]'
     result = parse_gate(df)
     assert isinstance(result, ParseResult)
     assert result.ok is True
     assert result.command_count == 3
 
 
-def test_parse_gate_rejects_empty_input():
+def test_parse_gate_rejects_empty_input() -> None:
     # The dockerfile lib is extremely lenient - even '@@@' parses as 1
     # instruction. The only way to trigger GoParseError on plain strings is
     # the empty-input path ("file with no instructions").
@@ -39,7 +41,7 @@ def test_parse_gate_rejects_empty_input():
     assert "parse" in result.error.lower()
 
 
-def test_parse_gate_rejects_too_short():
+def test_parse_gate_rejects_too_short() -> None:
     result = parse_gate("FROM scratch")
     assert result.ok is False
     assert "too short" in result.error.lower() or "minimum" in result.error.lower()
@@ -47,8 +49,8 @@ def test_parse_gate_rejects_too_short():
 
 @pytest.mark.docker
 @pytest.mark.skipif(not DOCKER_AVAILABLE, reason="docker daemon not available")
-def test_build_gate_succeeds_on_minimal_alpine():
-    df = "FROM alpine:3.20\nRUN echo hello > /msg\nCMD [\"cat\",\"/msg\"]\n"
+def test_build_gate_succeeds_on_minimal_alpine() -> None:
+    df = 'FROM alpine:3.20\nRUN echo hello > /msg\nCMD ["cat","/msg"]\n'
     result = build_gate(df, timeout_s=120)
     assert isinstance(result, BuildResult)
     assert result.ok is True
@@ -59,7 +61,7 @@ def test_build_gate_succeeds_on_minimal_alpine():
 
 @pytest.mark.docker
 @pytest.mark.skipif(not DOCKER_AVAILABLE, reason="docker daemon not available")
-def test_build_gate_fails_on_broken_command():
+def test_build_gate_fails_on_broken_command() -> None:
     df = "FROM alpine:3.20\nRUN exit 1\n"
     result = build_gate(df, timeout_s=60)
     assert result.ok is False
@@ -68,8 +70,8 @@ def test_build_gate_fails_on_broken_command():
 
 @pytest.mark.docker
 @pytest.mark.skipif(not DOCKER_AVAILABLE, reason="docker daemon not available")
-def test_test_gate_passes_when_substring_present():
-    df = "FROM alpine:3.20\nRUN echo readyok > /msg\nCMD [\"cat\",\"/msg\"]\n"
+def test_test_gate_passes_when_substring_present() -> None:
+    df = 'FROM alpine:3.20\nRUN echo readyok > /msg\nCMD ["cat","/msg"]\n'
     build = build_gate(df)
     assert build.ok
     result = run_test_gate(build.tag, ["cat", "/msg"], "readyok", timeout_s=30)
@@ -80,8 +82,8 @@ def test_test_gate_passes_when_substring_present():
 
 @pytest.mark.docker
 @pytest.mark.skipif(not DOCKER_AVAILABLE, reason="docker daemon not available")
-def test_test_gate_fails_when_substring_absent():
-    df = "FROM alpine:3.20\nRUN echo nope > /msg\nCMD [\"cat\",\"/msg\"]\n"
+def test_test_gate_fails_when_substring_absent() -> None:
+    df = 'FROM alpine:3.20\nRUN echo nope > /msg\nCMD ["cat","/msg"]\n'
     build = build_gate(df)
     assert build.ok
     result = run_test_gate(build.tag, ["cat", "/msg"], "readyok", timeout_s=30)
@@ -90,7 +92,7 @@ def test_test_gate_fails_when_substring_absent():
 
 @pytest.mark.docker
 @pytest.mark.skipif(not DOCKER_AVAILABLE, reason="docker daemon not available")
-def test_annotate_one_happy_path_flask_smoke():
+def test_annotate_one_happy_path_flask_smoke() -> None:
     df = """FROM python:3.12-slim
 RUN pip install --no-cache-dir flask==3.0.0
 CMD ["python","-c","import flask,sys;print('ok',flask.__version__)"]
@@ -102,20 +104,23 @@ CMD ["python","-c","import flask,sys;print('ok',flask.__version__)"]
     assert result.baseline_build_s > 0
 
 
-def test_infer_test_cmd_python():
+def test_infer_test_cmd_python() -> None:
     df = "FROM python:3.12-slim\nRUN pip install flask\n"
     cmd, expected = infer_test_cmd(df)
+    assert cmd is not None
+    assert expected is not None
     assert cmd[0] == "python"
     assert "ok" in expected.lower()
 
 
-def test_infer_test_cmd_node():
+def test_infer_test_cmd_node() -> None:
     df = "FROM node:20-alpine\nRUN npm install express\n"
-    cmd, expected = infer_test_cmd(df)
+    cmd, _expected = infer_test_cmd(df)
+    assert cmd is not None
     assert cmd[0] == "node"
 
 
-def test_infer_test_cmd_falls_back_to_none_on_unknown():
+def test_infer_test_cmd_falls_back_to_none_on_unknown() -> None:
     df = "FROM scratch\nCOPY app /app\n"
     cmd, expected = infer_test_cmd(df)
     assert cmd is None and expected is None

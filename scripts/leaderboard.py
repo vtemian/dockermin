@@ -10,6 +10,7 @@ holdout (the dockermin-v0 dataset) so we can recover ``baseline_size`` and
 compute the reduction. The holdout id used at eval time should be passed via
 ``--holdout`` (default: ``vladtemian/dockermin-v0``).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -23,6 +24,7 @@ from pathlib import Path
 def _load_baseline_sizes(holdout_id: str) -> dict[str, int]:
     """Map triple_id -> baseline_size from the holdout dataset."""
     from datasets import load_dataset
+
     ds = load_dataset(holdout_id)
     split = ds["test"] if "test" in ds else ds["train"]
     sizes: dict[str, int] = {}
@@ -93,12 +95,14 @@ def _render_markdown(stats: dict[str, dict]) -> str:
 
 def main() -> int:
     p = argparse.ArgumentParser(description="Aggregate eval results into a leaderboard.")
-    p.add_argument("--in", dest="in_path", type=Path, required=True,
-                   help="Input JSONL of EvalEntry rows.")
-    p.add_argument("--out", type=Path, default=Path("docs/leaderboard.md"),
-                   help="Output markdown path. Default: docs/leaderboard.md")
-    p.add_argument("--holdout", default="vladtemian/dockermin-v0",
-                   help="HF dataset id for baseline_size lookup.")
+    p.add_argument("--in", dest="in_path", type=Path, required=True, help="Input JSONL of EvalEntry rows.")
+    p.add_argument(
+        "--out",
+        type=Path,
+        default=Path("docs/leaderboard.md"),
+        help="Output markdown path. Default: docs/leaderboard.md",
+    )
+    p.add_argument("--holdout", default="vladtemian/dockermin-v0", help="HF dataset id for baseline_size lookup.")
     args = p.parse_args()
 
     rows = [json.loads(line) for line in args.in_path.read_text().splitlines() if line.strip()]

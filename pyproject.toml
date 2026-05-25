@@ -83,19 +83,27 @@ select = [
 ignore = [
     "S101",     # assert in tests
     "S311",     # pseudo-random (non-crypto: hash suffixes, seeds)
+    "SIM105",   # contextlib.suppress over try/except/pass — readability choice
     "ANN204",   # missing return type for __init__
     "TRY003",   # long exception messages are fine
-    "EM101",    # raw string in exception
-    "EM102",    # f-string in exception
     "RET504",   # unnecessary assignment before return — readability choice
 ]
 fixable = ["ALL"]
 unfixable = []
 
+[tool.ruff.lint.isort]
+# We target Python 3.11 (pinned by the torch/vllm ML stack - cannot move to
+# 3.14 where PEP 649 would make this unnecessary). With the TCH rule deferring
+# type-only imports under `if TYPE_CHECKING:`, the future import is what keeps
+# those annotations from NameError-ing at runtime. Enforce it everywhere so it
+# is a deliberate one-line policy, not scattered cargo-cult.
+required-imports = ["from __future__ import annotations"]
+
 [tool.ruff.lint.mccabe]
 max-complexity = 5
 
 [tool.ruff.lint.pylint]
+max-args = 6
 max-branches = 4
 max-returns = 4
 max-statements = 15

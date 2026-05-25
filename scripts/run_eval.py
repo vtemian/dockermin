@@ -8,6 +8,7 @@ Usage:
 The holdout defaults to the ``test`` split of ``vladtemian/dockermin-v0``. If the
 dataset has no explicit test split, the last 150 rows of ``train`` are used.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -53,7 +54,7 @@ def main() -> int:
         "--baselines",
         nargs="+",
         required=True,
-        help=f"Baseline names. Available: {' '.join(available_baselines() + ['agent_loop'])}",
+        help=f"Baseline names. Available: {' '.join([*available_baselines(), 'agent_loop'])}",
     )
     p.add_argument(
         "--out",

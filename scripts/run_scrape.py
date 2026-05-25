@@ -1,4 +1,5 @@
 """Run all scrapers, write candidates to data/raw/candidates.jsonl. CPU-only."""
+
 from __future__ import annotations
 
 import json

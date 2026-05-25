@@ -1,6 +1,8 @@
 """Per-Dockerfile annotation pipeline: parse, build, test."""
+
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import subprocess
 import tempfile
@@ -10,7 +12,7 @@ from pathlib import Path
 
 import docker
 import dockerfile
-from docker.errors import APIError
+from docker.errors import APIError, NotFound
 
 MIN_COMMANDS = 2
 
@@ -49,7 +51,7 @@ class AnnotateResult:
     error: str = ""
 
 
-def _docker_client():
+def _docker_client() -> docker.DockerClient:
     return docker.from_env(timeout=600)
 
 
@@ -60,13 +62,53 @@ def parse_gate(df_text: str) -> ParseResult:
     except dockerfile.GoParseError as e:
         return ParseResult(ok=False, error=f"parse error: {e}")
     if len(cmds) < MIN_COMMANDS:
-        return ParseResult(ok=False, command_count=len(cmds),
-                           error=f"too short: {len(cmds)} < minimum {MIN_COMMANDS}")
+        return ParseResult(ok=False, command_count=len(cmds), error=f"too short: {len(cmds)} < minimum {MIN_COMMANDS}")
     return ParseResult(ok=True, command_count=len(cmds))
 
 
-def build_gate(df_text: str, timeout_s: int = 300,
-               builder: str | None = None, cache_dir: str | None = None) -> BuildResult:
+def _buildx_command(
+    tag: str, dockerfile_path: Path, context_path: Path, builder: str | None, cache_dir: str | None
+) -> list[str]:
+    """Assemble the `docker buildx build` argv for this build."""
+    cmd = ["docker", "buildx", "build", "--load", "-t", tag, "-f", str(dockerfile_path)]
+    if builder:
+        cmd += ["--builder", builder]
+    if cache_dir:
+        cmd += [
+            "--cache-from",
+            f"type=local,src={cache_dir}",
+            "--cache-to",
+            f"type=local,dest={cache_dir},mode=max",
+        ]
+    cmd.append(str(context_path))
+    return cmd
+
+
+def _run_buildx(df_text: str, tag: str, timeout_s: int, builder: str | None, cache_dir: str | None) -> str | None:
+    """Run `docker buildx build` in a temp context; return an error or None."""
+    with tempfile.TemporaryDirectory(prefix="bldctx_") as ctx:
+        ctx_path = Path(ctx)
+        (ctx_path / "Dockerfile").write_text(df_text)
+        cmd = _buildx_command(tag, ctx_path / "Dockerfile", ctx_path, builder, cache_dir)
+        try:
+            # Fixed `docker buildx` argv (no shell); returncode checked below.
+            proc = subprocess.run(  # noqa: S603
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout_s,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            return f"build timeout after {timeout_s}s"
+    if proc.returncode != 0:
+        return f"buildx rc={proc.returncode}: {proc.stderr[-400:]}"
+    return None
+
+
+def build_gate(
+    df_text: str, timeout_s: int = 300, builder: str | None = None, cache_dir: str | None = None
+) -> BuildResult:
     """Build the Dockerfile via `docker buildx build` and return image size.
 
     BuildKit hot-path so apt/pip/npm cache mounts amortize across rollouts.
@@ -86,32 +128,29 @@ def build_gate(df_text: str, timeout_s: int = 300,
     digest = hashlib.sha256(df_text.encode()).hexdigest()[:12]
     tag = f"dockermin/curate:{digest}"
     t0 = time.perf_counter()
-    with tempfile.TemporaryDirectory(prefix="bldctx_") as ctx:
-        ctx_path = Path(ctx)
-        (ctx_path / "Dockerfile").write_text(df_text)
-        cmd = ["docker", "buildx", "build", "--load", "-t", tag,
-               "-f", str(ctx_path / "Dockerfile")]
-        if builder:
-            cmd += ["--builder", builder]
-        if cache_dir:
-            cmd += [
-                "--cache-from", f"type=local,src={cache_dir}",
-                "--cache-to", f"type=local,dest={cache_dir},mode=max",
-            ]
-        cmd.append(str(ctx_path))
-        try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s)
-        except subprocess.TimeoutExpired:
-            return BuildResult(ok=False, error=f"build timeout after {timeout_s}s")
-        if proc.returncode != 0:
-            return BuildResult(ok=False,
-                               error=f"buildx rc={proc.returncode}: {proc.stderr[-400:]}")
+    build_error = _run_buildx(df_text, tag, timeout_s, builder, cache_dir)
+    if build_error is not None:
+        return BuildResult(ok=False, error=build_error)
     elapsed = time.perf_counter() - t0
     try:
         size = _docker_client().images.get(tag).attrs["Size"]
     except APIError as e:
         return BuildResult(ok=False, error=f"image inspect failed: {e}")
     return BuildResult(ok=True, tag=tag, size_bytes=size, build_seconds=elapsed)
+
+
+def _evaluate_run(container: docker.models.containers.Container, expected_substring: str, timeout_s: int) -> TestResult:
+    """Wait for the container, then match exit code and expected substring."""
+    status = container.wait(timeout=timeout_s)
+    exit_code = status.get("StatusCode")
+    stdout = container.logs(stdout=True, stderr=False).decode("utf-8", errors="replace")
+    stderr = container.logs(stdout=False, stderr=True).decode("utf-8", errors="replace")
+    combined = stdout + "\n" + stderr
+    if exit_code != 0:
+        return TestResult(ok=False, output=combined, exit_code=exit_code, error=f"non-zero exit {exit_code}")
+    if expected_substring not in combined:
+        return TestResult(ok=False, output=combined, exit_code=exit_code, error="expected substring not found")
+    return TestResult(ok=True, output=combined, exit_code=exit_code)
 
 
 def run_test_gate(tag: str, cmd: list[str], expected_substring: str, timeout_s: int = 30) -> TestResult:
@@ -124,77 +163,76 @@ def run_test_gate(tag: str, cmd: list[str], expected_substring: str, timeout_s: 
     if a triple slipped through with no expectation. Reject at the gate.
     """
     if not expected_substring:
-        return TestResult(ok=False,
-                          error="empty expected_substring would trivially pass; refuse")
+        return TestResult(ok=False, error="empty expected_substring would trivially pass; refuse")
     client = _docker_client()
     try:
         container = client.containers.run(
-            tag, command=cmd, detach=True,
+            tag,
+            command=cmd,
+            detach=True,
             network_mode="bridge",
-            mem_limit="1g", memswap_limit="1g",
+            mem_limit="1g",
+            memswap_limit="1g",
             nano_cpus=2_000_000_000,
             pids_limit=512,
         )
     except APIError as e:
         return TestResult(ok=False, error=f"start error: {e}")
     try:
-        status = container.wait(timeout=timeout_s)
-        exit_code = status.get("StatusCode")
-        stdout = container.logs(stdout=True, stderr=False).decode("utf-8", errors="replace")
-        stderr = container.logs(stdout=False, stderr=True).decode("utf-8", errors="replace")
-        combined = stdout + "\n" + stderr
-        if exit_code != 0:
-            return TestResult(ok=False, output=combined, exit_code=exit_code,
-                              error=f"non-zero exit {exit_code}")
-        if expected_substring not in combined:
-            return TestResult(ok=False, output=combined, exit_code=exit_code,
-                              error="expected substring not found")
-        return TestResult(ok=True, output=combined, exit_code=exit_code)
+        return _evaluate_run(container, expected_substring, timeout_s)
     finally:
-        try:
+        # Best-effort cleanup: the container may already be gone (NotFound) or
+        # the daemon may transiently error (APIError); neither should mask the
+        # gate result.
+        with contextlib.suppress(APIError, NotFound):
             container.remove(force=True)
-        except Exception:
-            pass
 
 
-def annotate_one(df_text: str, test_cmd: list[str], expected_substring: str,
-                 build_timeout_s: int = 300, test_timeout_s: int = 30,
-                 builder: str | None = None, cache_dir: str | None = None) -> AnnotateResult:
+def annotate_one(  # noqa: PLR0913 — parse/build/test gate inputs + per-gate timeouts/builder are an irreducible pipeline contract
+    df_text: str,
+    test_cmd: list[str],
+    expected_substring: str,
+    build_timeout_s: int = 300,
+    test_timeout_s: int = 30,
+    builder: str | None = None,
+    cache_dir: str | None = None,
+) -> AnnotateResult:
     p = parse_gate(df_text)
     if not p.ok:
         return AnnotateResult(ok=False, error=p.error)
-    b = build_gate(df_text, timeout_s=build_timeout_s,
-                   builder=builder, cache_dir=cache_dir)
+    b = build_gate(df_text, timeout_s=build_timeout_s, builder=builder, cache_dir=cache_dir)
     if not b.ok:
         return AnnotateResult(ok=False, error=b.error)
     t = run_test_gate(b.tag, test_cmd, expected_substring, timeout_s=test_timeout_s)
     # Best-effort cleanup of the tagged image regardless of outcome: callers
     # only need size + test_ok. Keeping every tag fills the disk fast under
     # parallel curation (8 workers x 200 candidates x ~150MB base = ~250GB).
-    try:
+    # Already gone -> NotFound; daemon hiccup -> APIError; neither must fail us.
+    with contextlib.suppress(APIError, NotFound):
         _docker_client().images.remove(b.tag, force=True)
-    except Exception:
-        pass
     if not t.ok:
         return AnnotateResult(ok=False, error=t.error)
-    return AnnotateResult(ok=True, baseline_size=b.size_bytes,
-                          baseline_build_s=b.build_seconds, tag=b.tag)
+    return AnnotateResult(ok=True, baseline_size=b.size_bytes, baseline_build_s=b.build_seconds, tag=b.tag)
+
+
+# Ordered ecosystem detectors: first matching keyword set wins.
+# java -version writes to stderr; the openjdk/temurin runtime always prints a
+# line starting with "openjdk"/"OpenJDK", so we match on that substring.
+#
+# Golang is intentionally absent: /app/server would be a guess and we cannot
+# give an empty expected (reward-hacking surface), so go images fall through to
+# (None, None) and the bulk annotator skips them without a meaningful test.
+_TEST_CMD_BY_ECOSYSTEM: tuple[tuple[tuple[str, ...], list[str], str], ...] = (
+    (("from python", "pip install"), ["python", "-c", "import sys;print('ok',sys.version_info[:2])"], "ok"),
+    (("from node", "npm install"), ["node", "-e", "console.log('ok',process.version)"], "ok"),
+    (("from openjdk", "from eclipse-temurin"), ["java", "-version"], "openjdk"),
+)
 
 
 def infer_test_cmd(df_text: str) -> tuple[list[str] | None, str | None]:
     """Best-effort default test_cmd per ecosystem. Returns (None, None) if unknown."""
     text = df_text.lower()
-    if "from python" in text or "pip install" in text:
-        return (["python", "-c", "import sys;print('ok',sys.version_info[:2])"], "ok")
-    if "from node" in text or "npm install" in text:
-        return (["node", "-e", "console.log('ok',process.version)"], "ok")
-    if "from golang" in text or "go build" in text:
-        # /app/server is a guess; we cannot give an empty expected (reward
-        # hacking surface) so drop the triple if we cannot verify. The bulk
-        # annotator will skip these without a meaningful test.
-        return (None, None)
-    if "from openjdk" in text or "from eclipse-temurin" in text:
-        # java -version writes to stderr; the openjdk/temurin runtime always
-        # prints a line starting with "openjdk" or "OpenJDK". Match on that.
-        return (["java", "-version"], "openjdk")
+    for keywords, cmd, expected in _TEST_CMD_BY_ECOSYSTEM:
+        if any(keyword in text for keyword in keywords):
+            return (cmd, expected)
     return (None, None)

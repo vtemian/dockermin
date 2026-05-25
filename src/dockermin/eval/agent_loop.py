@@ -6,6 +6,7 @@ flag in this Claude Code version; budget cap + 600s timeout are the bounds).
 The agent edits ``./Dockerfile`` in place inside a temp dir made accessible
 via ``--add-dir``; we read the final state back and verify with annotate.
 """
+
 from __future__ import annotations
 
 import json
@@ -14,6 +15,7 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
+from typing import Any
 
 from dockermin.eval.baselines import (
     EvalEntry,
@@ -23,8 +25,9 @@ from dockermin.eval.baselines import (
 )
 
 
-def run_agent_loop(dockerfile: str, test_cmd: list[str], expected: str,
-                   budget_usd: float = 0.50, timeout_s: int = 600) -> dict:
+def run_agent_loop(
+    dockerfile: str, test_cmd: list[str], expected: str, budget_usd: float = 0.50, timeout_s: int = 600
+) -> dict[str, Any]:
     """Drive Claude Code headless to optimize a single Dockerfile.
 
     Returns a dict with the final Dockerfile text and run metadata
@@ -44,14 +47,21 @@ def run_agent_loop(dockerfile: str, test_cmd: list[str], expected: str,
         f"working smaller image."
     )
     try:
-        result = subprocess.run(
-            [
-                "claude", "-p", prompt,
-                "--output-format", "json",
-                "--model", "claude-sonnet-4-6",
-                "--max-budget-usd", str(budget_usd),
-                "--permission-mode", "bypassPermissions",
-                "--add-dir", str(workdir),
+        result = subprocess.run(  # noqa: S603 — fixed CLI args, no untrusted executable
+            [  # noqa: S607 — claude resolved via PATH by design
+                "claude",
+                "-p",
+                prompt,
+                "--output-format",
+                "json",
+                "--model",
+                "claude-sonnet-4-6",
+                "--max-budget-usd",
+                str(budget_usd),
+                "--permission-mode",
+                "bypassPermissions",
+                "--add-dir",
+                str(workdir),
                 "--allowedTools",
                 "Bash(docker build *),Bash(docker run *),Read,Edit,Write",
             ],
@@ -59,6 +69,7 @@ def run_agent_loop(dockerfile: str, test_cmd: list[str], expected: str,
             capture_output=True,
             text=True,
             timeout=timeout_s,
+            check=False,
         )
         meta = json.loads(result.stdout) if result.returncode == 0 else {}
         final_df = (workdir / "Dockerfile").read_text()
@@ -73,24 +84,29 @@ def run_agent_loop(dockerfile: str, test_cmd: list[str], expected: str,
         shutil.rmtree(workdir, ignore_errors=True)
 
 
-def baseline_agent_loop(triple: dict) -> EvalEntry:
+def _run_and_verify(triple: dict[str, Any], t0: float) -> EvalEntry:
+    """Run the agent loop and verify the resulting Dockerfile."""
+    res = run_agent_loop(
+        triple["dockerfile"],
+        triple["test_cmd"],
+        triple.get("expected_substring", ""),
+    )
+    new_df = res.get("final_dockerfile") or ""
+    if not new_df.strip():
+        return _error_entry("agent_loop", triple, t0, "agent produced empty dockerfile")
+    return _entry("agent_loop", triple, new_df, t0)
+
+
+def baseline_agent_loop(triple: dict[str, Any]) -> EvalEntry:
     """Wrap run_agent_loop with annotate-verified size measurement."""
     t0 = time.perf_counter()
     try:
-        res = run_agent_loop(
-            triple["dockerfile"],
-            triple["test_cmd"],
-            triple.get("expected_substring", ""),
-        )
-        new_df = res.get("final_dockerfile") or ""
-        if not new_df.strip():
-            return _error_entry("agent_loop", triple, t0, "agent produced empty dockerfile")
-        return _entry("agent_loop", triple, new_df, t0)
+        return _run_and_verify(triple, t0)
     except FileNotFoundError as e:
         return _error_entry("agent_loop", triple, t0, f"claude binary not found: {e!r}")
     except subprocess.TimeoutExpired:
         return _error_entry("agent_loop", triple, t0, "agent loop timed out")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — safety net: one bad Dockerfile must not crash the eval loop
         return _error_entry("agent_loop", triple, t0, f"agent loop error: {e!r}")
 
 

@@ -4,40 +4,18 @@ Writes a fresh per-run output file (so we can re-run safely without clobbering
 the curated set while another consumer is reading it), then atomically merges
 into the curated triples on success. Dedup is on the candidate id.
 """
+
 from __future__ import annotations
 
 import argparse
-import atexit
-import fcntl
 import json
 import os
-import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from dockermin.dataset.annotate import annotate_one, infer_test_cmd
-
-
-def acquire_lock(path: str) -> int:
-    """Acquire an exclusive flock on path. Exit with code 1 if held."""
-    fd = os.open(path, os.O_CREAT | os.O_WRONLY, 0o644)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        try:
-            with open(path) as f:
-                holder = f.read().strip()
-            print(f"already running (lockfile {path} held by pid {holder})", file=sys.stderr)
-        except Exception:
-            print(f"already running (lockfile {path} held)", file=sys.stderr)
-        sys.exit(1)
-    os.ftruncate(fd, 0)
-    os.write(fd, f"{os.getpid()}\n".encode())
-    os.fsync(fd)
-    # Keep fd open for the lifetime of the process; closing releases the lock.
-    atexit.register(lambda: os.close(fd))
-    return fd
+from dockermin.ops import acquire_lock, read_jsonl
 
 DEFAULT_IN = Path("data/raw/candidates.jsonl")
 DEFAULT_OUT = Path("data/curated/triples.jsonl")
@@ -73,17 +51,7 @@ def _merge_into_curated(new_triples: list[dict], out_path: Path) -> tuple[int, i
 
     Returns (existing, added, total).
     """
-    existing: list[dict] = []
-    if out_path.exists():
-        with out_path.open() as fin:
-            for line in fin:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    existing.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
+    existing: list[dict] = read_jsonl(out_path) if out_path.exists() else []
     by_id: dict[str, dict] = {r.get("id", ""): r for r in existing}
     added = 0
     for t in new_triples:
@@ -102,14 +70,13 @@ def _merge_into_curated(new_triples: list[dict], out_path: Path) -> tuple[int, i
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--in", dest="in_path", default=str(DEFAULT_IN),
-                    help="input candidates.jsonl path")
-    ap.add_argument("--out", dest="out_path", default=str(DEFAULT_OUT),
-                    help="curated triples.jsonl path (merged into)")
+    ap.add_argument("--in", dest="in_path", default=str(DEFAULT_IN), help="input candidates.jsonl path")
+    ap.add_argument("--out", dest="out_path", default=str(DEFAULT_OUT), help="curated triples.jsonl path (merged into)")
     ap.add_argument("--workers", type=int, default=MAX_WORKERS)
     ap.add_argument("--target", type=int, default=TARGET)
-    ap.add_argument("--lockfile", default="logs/run_annotate.lock",
-                    help="exclusive flock path to prevent concurrent runs")
+    ap.add_argument(
+        "--lockfile", default="logs/run_annotate.lock", help="exclusive flock path to prevent concurrent runs"
+    )
     args = ap.parse_args()
 
     Path(args.lockfile).parent.mkdir(parents=True, exist_ok=True)
@@ -120,16 +87,15 @@ def main() -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Per-run scratch file so we never blank the curated file mid-run.
-    scratch = Path(tempfile.mkstemp(prefix="annotate_", suffix=".jsonl",
-                                    dir=str(out_path.parent))[1])
+    scratch = Path(tempfile.mkstemp(prefix="annotate_", suffix=".jsonl", dir=str(out_path.parent))[1])
     print(f"reading {in_path} -> scratch {scratch} (workers={args.workers}, target={args.target})")
 
     seen = 0
     kept_records: list[dict] = []
     with in_path.open() as fin, scratch.open("w") as fout, ThreadPoolExecutor(args.workers) as ex:
         futures = []
-        for line in fin:
-            line = line.strip()
+        for raw in fin:
+            line = raw.strip()
             if not line:
                 continue
             seen += 1

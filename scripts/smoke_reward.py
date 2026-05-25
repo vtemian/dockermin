@@ -4,6 +4,7 @@ Sends each prompt through the formatted messages, asks the model to emit an opti
 Dockerfile, then scores it with the same dockermin_reward used by GRPO. This is a cheap
 end-to-end smoke test before paying for GPU rollouts.
 """
+
 from __future__ import annotations
 
 import json
@@ -21,9 +22,7 @@ MAX_TOKENS = 1024
 
 
 def main() -> None:
-    triples = [
-        json.loads(line) for line in TRIPLES_PATH.read_text().splitlines() if line.strip()
-    ]
+    triples = [json.loads(line) for line in TRIPLES_PATH.read_text().splitlines() if line.strip()]
     triples = triples[:SAMPLE_N]
     client = Anthropic()
 

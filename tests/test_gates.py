@@ -1,64 +1,131 @@
 """Tests for reward gates pure scoring."""
+
+from __future__ import annotations
+
 import pytest
 
 from dockermin.reward.gates import compute_score
 
 
-def test_compute_score_parse_fail_returns_minus_point_1():
-    s = compute_score(parse_ok=False, build_ok=False, test_ok=False,
-                      command_count=0, baseline_size=100, new_size=0, dockerfile_text="")
+def test_compute_score_parse_fail_returns_minus_point_1() -> None:
+    s = compute_score(
+        parse_ok=False,
+        build_ok=False,
+        test_ok=False,
+        command_count=0,
+        baseline_size=100,
+        new_size=0,
+        dockerfile_text="",
+    )
     assert s == pytest.approx(-0.1)
 
-def test_compute_score_too_few_commands_returns_minus_point_2():
-    s = compute_score(parse_ok=True, build_ok=False, test_ok=False,
-                      command_count=1, baseline_size=100, new_size=0, dockerfile_text="FROM scratch")
+
+def test_compute_score_too_few_commands_returns_minus_point_2() -> None:
+    s = compute_score(
+        parse_ok=True,
+        build_ok=False,
+        test_ok=False,
+        command_count=1,
+        baseline_size=100,
+        new_size=0,
+        dockerfile_text="FROM scratch",
+    )
     assert s == pytest.approx(-0.2)
 
-def test_compute_score_build_fail_returns_zero():
-    s = compute_score(parse_ok=True, build_ok=False, test_ok=False,
-                      command_count=3, baseline_size=100, new_size=0, dockerfile_text="...")
+
+def test_compute_score_build_fail_returns_zero() -> None:
+    s = compute_score(
+        parse_ok=True,
+        build_ok=False,
+        test_ok=False,
+        command_count=3,
+        baseline_size=100,
+        new_size=0,
+        dockerfile_text="...",
+    )
     assert s == pytest.approx(0.0)
 
-def test_compute_score_build_pass_test_fail_returns_point_05():
-    s = compute_score(parse_ok=True, build_ok=True, test_ok=False,
-                      command_count=3, baseline_size=100, new_size=80, dockerfile_text="...")
+
+def test_compute_score_build_pass_test_fail_returns_point_05() -> None:
+    s = compute_score(
+        parse_ok=True,
+        build_ok=True,
+        test_ok=False,
+        command_count=3,
+        baseline_size=100,
+        new_size=80,
+        dockerfile_text="...",
+    )
     assert s == pytest.approx(0.05)
 
-def test_compute_score_test_pass_full_reduction_returns_around_one():
-    s = compute_score(parse_ok=True, build_ok=True, test_ok=True,
-                      command_count=3, baseline_size=100, new_size=10,
-                      dockerfile_text="FROM gcr.io/distroless/python3-debian12\nCMD [\"x\"]")
+
+def test_compute_score_test_pass_full_reduction_returns_around_one() -> None:
+    s = compute_score(
+        parse_ok=True,
+        build_ok=True,
+        test_ok=True,
+        command_count=3,
+        baseline_size=100,
+        new_size=10,
+        dockerfile_text='FROM gcr.io/distroless/python3-debian12\nCMD ["x"]',
+    )
     assert 0.95 <= s <= 1.0  # 0.5 base + 0.5 * 0.9 reduction + small distroless bonus, capped at 1.0
 
-def test_shape_bonus_gated_on_test_pass():
+
+def test_shape_bonus_gated_on_test_pass() -> None:
     # Build passes but test fails: NO shape bonus from alpine string
-    s = compute_score(parse_ok=True, build_ok=True, test_ok=False,
-                      command_count=3, baseline_size=100, new_size=20,
-                      dockerfile_text="FROM alpine\nRUN whatever")
+    s = compute_score(
+        parse_ok=True,
+        build_ok=True,
+        test_ok=False,
+        command_count=3,
+        baseline_size=100,
+        new_size=20,
+        dockerfile_text="FROM alpine\nRUN whatever",
+    )
     assert s == pytest.approx(0.05)  # NO alpine shape bonus when test failed
 
-def test_from_scratch_with_leading_copy_no_penalty():
+
+def test_from_scratch_with_leading_copy_no_penalty() -> None:
     # Regression: prior implementation matched " copy " with surrounding spaces,
     # so a leading "COPY app /app" at line start was missed and the -0.10
     # "from scratch with no COPY" penalty was wrongly applied.
-    df = "FROM scratch\nCOPY app /app\nCMD [\"/app\"]"
-    s_with_copy = compute_score(parse_ok=True, build_ok=True, test_ok=True,
-                                command_count=3, baseline_size=100, new_size=80,
-                                dockerfile_text=df)
-    s_no_copy = compute_score(parse_ok=True, build_ok=True, test_ok=True,
-                              command_count=3, baseline_size=100, new_size=80,
-                              dockerfile_text="FROM scratch\nCMD [\"/x\"]")
+    df = 'FROM scratch\nCOPY app /app\nCMD ["/app"]'
+    s_with_copy = compute_score(
+        parse_ok=True, build_ok=True, test_ok=True, command_count=3, baseline_size=100, new_size=80, dockerfile_text=df
+    )
+    s_no_copy = compute_score(
+        parse_ok=True,
+        build_ok=True,
+        test_ok=True,
+        command_count=3,
+        baseline_size=100,
+        new_size=80,
+        dockerfile_text='FROM scratch\nCMD ["/x"]',
+    )
     # The COPY variant must NOT take the -0.10 penalty, so its score is higher.
     assert s_with_copy > s_no_copy
     # And specifically: the gap should be ~0.10 (the penalty we avoided).
     assert s_with_copy - s_no_copy == pytest.approx(0.10, abs=0.001)
 
 
-def test_latest_tag_penalty_applied_when_test_passes():
-    s_with = compute_score(parse_ok=True, build_ok=True, test_ok=True,
-                           command_count=3, baseline_size=100, new_size=80,
-                           dockerfile_text="FROM python:latest\nCMD [\"x\"]")
-    s_without = compute_score(parse_ok=True, build_ok=True, test_ok=True,
-                              command_count=3, baseline_size=100, new_size=80,
-                              dockerfile_text="FROM python:3.12-slim\nCMD [\"x\"]")
+def test_latest_tag_penalty_applied_when_test_passes() -> None:
+    s_with = compute_score(
+        parse_ok=True,
+        build_ok=True,
+        test_ok=True,
+        command_count=3,
+        baseline_size=100,
+        new_size=80,
+        dockerfile_text='FROM python:latest\nCMD ["x"]',
+    )
+    s_without = compute_score(
+        parse_ok=True,
+        build_ok=True,
+        test_ok=True,
+        command_count=3,
+        baseline_size=100,
+        new_size=80,
+        dockerfile_text='FROM python:3.12-slim\nCMD ["x"]',
+    )
     assert s_without > s_with

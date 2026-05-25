@@ -20,43 +20,20 @@ Reward signal during training: rewrite the variant -> smaller working image.
 
 Cost: ~$0.02 per variant via Sonnet 4.6. 5 variants/base x 20 bases ~$2.
 """
+
 from __future__ import annotations
 
 import argparse
-import atexit
-import fcntl
 import hashlib
 import json
-import os
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 from dockermin.dataset.annotate import annotate_one
+from dockermin.ops import acquire_lock, append_jsonl, read_jsonl
 from dockermin.reward.prompts import extract_dockerfile
-
-
-def acquire_lock(path: str) -> int:
-    """Acquire an exclusive flock on path. Exit with code 1 if held."""
-    fd = os.open(path, os.O_CREAT | os.O_WRONLY, 0o644)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        try:
-            with open(path) as f:
-                holder = f.read().strip()
-            print(f"already running (lockfile {path} held by pid {holder})", file=sys.stderr)
-        except Exception:
-            print(f"already running (lockfile {path} held)", file=sys.stderr)
-        sys.exit(1)
-    os.ftruncate(fd, 0)
-    os.write(fd, f"{os.getpid()}\n".encode())
-    os.fsync(fd)
-    # Keep fd open for the lifetime of the process; closing releases the lock.
-    atexit.register(lambda: os.close(fd))
-    return fd
-
 
 SYSTEM_PROMPT = (
     "You are generating training data for a Dockerfile-shrinking reinforcement-"
@@ -70,9 +47,14 @@ SYSTEM_PROMPT = (
 )
 
 
-def generate_variant(baseline_df: str, test_cmd: list[str], expected: str,
-                     variant_seed: int, budget_usd: float = 0.20,
-                     timeout_s: int = 120) -> str | None:
+def generate_variant(
+    baseline_df: str,
+    test_cmd: list[str],
+    expected: str,
+    variant_seed: int,
+    budget_usd: float = 0.20,
+    timeout_s: int = 120,
+) -> str | None:
     """Drive `claude -p` headless to produce a single variant Dockerfile.
 
     Cost note: Claude Code's default system prompt + tool defs trigger
@@ -90,13 +72,19 @@ def generate_variant(baseline_df: str, test_cmd: list[str], expected: str,
         f"single fenced ```dockerfile block."
     )
     cmd = [
-        "claude", "-p", user_msg,
-        "--output-format", "json",
-        "--model", "claude-sonnet-4-6",
-        "--max-budget-usd", str(budget_usd),
+        "claude",
+        "-p",
+        user_msg,
+        "--output-format",
+        "json",
+        "--model",
+        "claude-sonnet-4-6",
+        "--max-budget-usd",
+        str(budget_usd),
     ]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s)
+        # check=False: we inspect returncode ourselves below.
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s, check=False)
     except subprocess.TimeoutExpired:
         return None
     if proc.returncode != 0:
@@ -111,86 +99,74 @@ def generate_variant(baseline_df: str, test_cmd: list[str], expected: str,
 
 def main() -> int:
     p = argparse.ArgumentParser()
-    p.add_argument("--in", dest="in_path", default="data/curated/triples.jsonl",
-                   help="Path to baseline curated triples.")
+    p.add_argument(
+        "--in", dest="in_path", default="data/curated/triples.jsonl", help="Path to baseline curated triples."
+    )
     p.add_argument("--out", default="data/curated/triples_with_variants.jsonl")
     p.add_argument("--variants-per-base", type=int, default=5)
-    p.add_argument("--max-bases", type=int, default=20,
-                   help="Cap number of bases (variants_per_base x max_bases = total).")
+    p.add_argument(
+        "--max-bases", type=int, default=20, help="Cap number of bases (variants_per_base x max_bases = total)."
+    )
     p.add_argument("--lockfile", help="Path to exclusive lockfile to prevent concurrent runs")
     args = p.parse_args()
 
     if args.lockfile:
         acquire_lock(args.lockfile)
 
-    bases = [json.loads(line) for line in Path(args.in_path).read_text().splitlines()
-             if line.strip()]
+    bases = read_jsonl(args.in_path)
     bases = bases[: args.max_bases]
-    print(f"Generating variants for {len(bases)} baselines, "
-          f"{args.variants_per_base} variants each")
+    print(f"Generating variants for {len(bases)} baselines, {args.variants_per_base} variants each")
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     # Append-mode + dedup on startup so repeated invocations (or external
     # respawns) accumulate progress instead of truncating prior variants.
-    existing_ids: set[str] = set()
-    if out_path.exists():
-        for line in out_path.read_text().splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                existing_ids.add(json.loads(line)["id"])
-            except (json.JSONDecodeError, KeyError):
-                continue
+    existing_ids: set[str] = {rec["id"] for rec in read_jsonl(out_path) if "id" in rec} if out_path.exists() else set()
     print(f"resuming with {len(existing_ids)} existing entries")
     kept = len(existing_ids)
     failed = 0
-    with out_path.open("a") as fout:
-        for base in bases:
-            if base["id"] not in existing_ids:
-                fout.write(json.dumps(base) + "\n"); fout.flush()
-                existing_ids.add(base["id"])
-                kept += 1
-            for vi in range(args.variants_per_base):
-                variant_df = generate_variant(
-                    base["dockerfile"], base["test_cmd"],
-                    base["expected_substring"], vi)
-                if variant_df is None:
-                    print(f"  variant {vi}: claude returned no dockerfile or errored")
-                    failed += 1
-                    continue
-                # Validate variant builds + tests
-                res = annotate_one(variant_df, base["test_cmd"],
-                                   base["expected_substring"],
-                                   build_timeout_s=300, test_timeout_s=30)
-                if not res.ok:
-                    print(f"  variant {vi} failed annotate: {res.error[:200]}")
-                    failed += 1
-                    continue
-                vid = hashlib.sha256(variant_df.encode()).hexdigest()[:12]
-                rec_id = f"{base.get('id', 'unknown')}-v{vi}-{vid}"
-                if rec_id in existing_ids:
-                    print(f"  variant {vi}: already in output, skipping")
-                    continue
-                rec = {
-                    "id": rec_id,
-                    "dockerfile": variant_df,
-                    "test_cmd": base["test_cmd"],
-                    "expected_substring": base["expected_substring"],
-                    "baseline_size": res.baseline_size,
-                    "baseline_build_s": res.baseline_build_s,
-                    "ecosystem": base.get("ecosystem", "unknown"),
-                    "source_url": base.get("source_url", ""),
-                    "license": base.get("license"),
-                    "is_synthetic_variant": True,
-                    "base_id": base.get("id"),
-                }
-                fout.write(json.dumps(rec) + "\n"); fout.flush()
-                existing_ids.add(rec_id)
-                kept += 1
-                print(f"  variant {vi} kept ({res.baseline_size // 1_000_000} MB)")
-                time.sleep(0.5)  # gentle on api
+    for base in bases:
+        if base["id"] not in existing_ids:
+            append_jsonl(out_path, base)
+            existing_ids.add(base["id"])
+            kept += 1
+        for vi in range(args.variants_per_base):
+            variant_df = generate_variant(base["dockerfile"], base["test_cmd"], base["expected_substring"], vi)
+            if variant_df is None:
+                print(f"  variant {vi}: claude returned no dockerfile or errored")
+                failed += 1
+                continue
+            # Validate variant builds + tests
+            res = annotate_one(
+                variant_df, base["test_cmd"], base["expected_substring"], build_timeout_s=300, test_timeout_s=30
+            )
+            if not res.ok:
+                print(f"  variant {vi} failed annotate: {res.error[:200]}")
+                failed += 1
+                continue
+            vid = hashlib.sha256(variant_df.encode()).hexdigest()[:12]
+            rec_id = f"{base.get('id', 'unknown')}-v{vi}-{vid}"
+            if rec_id in existing_ids:
+                print(f"  variant {vi}: already in output, skipping")
+                continue
+            rec = {
+                "id": rec_id,
+                "dockerfile": variant_df,
+                "test_cmd": base["test_cmd"],
+                "expected_substring": base["expected_substring"],
+                "baseline_size": res.baseline_size,
+                "baseline_build_s": res.baseline_build_s,
+                "ecosystem": base.get("ecosystem", "unknown"),
+                "source_url": base.get("source_url", ""),
+                "license": base.get("license"),
+                "is_synthetic_variant": True,
+                "base_id": base.get("id"),
+            }
+            append_jsonl(out_path, rec)
+            existing_ids.add(rec_id)
+            kept += 1
+            print(f"  variant {vi} kept ({res.baseline_size // 1_000_000} MB)")
+            time.sleep(0.5)  # gentle on api
     print(f"done: kept {kept}, failed {failed}")
     return 0
 
