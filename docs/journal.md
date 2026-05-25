@@ -2,6 +2,17 @@
 
 Append per session. Last entry at top. 3-5 sentences per entry. What worked, what broke, what was not obvious.
 
+## 2026-05-25 (Vlad + Bot) - working-style retro + harness tuning
+
+Vlad asked for a deep analysis of how we work together. Mined the journal, memories, and the 4.7MB main session (55 subagent dispatches, 21 real human messages; the ~120 tiny uniform sessions are just synthetic-variant API calls, not conversations). Findings: Vlad directs rather than pairs — one dense up-front spec, then terse nudges, and a verbatim mantra repeated 8+ times ("spawn subagents → gather context → write detailed plan → implement"). He audits by pointed question ("why so many scripts?", "why the __future__ imports?") rather than reading diffs, and signals satisfaction by "continue", never praise.
+
+Decisions locked and encoded (so they survive context loss):
+- **No TodoWrite.** Removed the mandate from global `~/.claude/CLAUDE.md` (Vlad's call) — replaced the "Issue tracking" section with a "Workflow and delegation" section.
+- **Worktrees by default** for parallel subagent work — fixes the May 22 file-corruption night (parallel agents wrote the same file in "w" mode) structurally, not via lockfiles.
+- **Question policy:** batch independent choices, serialize only dependent ones.
+- **Don't wind down** / suggest sleep — encoded after the "stop seeing me to sleep, need to work" friction.
+- Built `~/.claude/commands/plan-it.md` and `ship-it.md` (the mantra as slash commands), and a dockermin `.claude/` commit-guard hook that hard-blocks `git commit` on main (the one gap the existing git pre-commit + CI quality gate don't cover). Hook verified on all three paths.
+
 ## 2026-05-25 (Vlad + Bot) - quality gates adopted, matching sisif bar
 
 Audited dockermin against sisif's quality system (4 subagents analyzed sisif's ruff/mypy config, enforcement, conventions, structure), wrote a 5-phase plan (`docs/plans/2026-05-25-quality-gates.md`), then implemented it with parallel subagents in two waves.
