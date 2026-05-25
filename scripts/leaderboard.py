@@ -46,12 +46,24 @@ def _aggregate(rows: list[dict], baseline_sizes: dict[str, int]) -> dict[str, di
         n_pass = sum(1 for e in entries if e.get("test_passes"))
         elapsed = [float(e.get("elapsed_s", 0.0)) for e in entries]
         reductions: list[float] = []
+        n_missing_baseline = 0
         for e in entries:
+            if e["triple_id"] not in baseline_sizes:
+                # A triple with no baseline_size in the holdout cannot have a
+                # reduction computed. Surface it as a skip instead of dropping
+                # it silently - a silent drop would understate the denominator.
+                n_missing_baseline += 1
+                print(
+                    f"WARNING: {name}: triple {e['triple_id']!r} has no baseline_size "
+                    "in the holdout - skipped from the reduction metric",
+                    file=sys.stderr,
+                )
+                continue
             if not e.get("test_passes"):
                 continue
-            base = baseline_sizes.get(e["triple_id"])
+            base = baseline_sizes[e["triple_id"]]
             new = e.get("new_size_bytes")
-            if base is None or new is None or base <= 0:
+            if new is None or base <= 0:
                 continue
             reductions.append(max(0.0, (base - new) / base))
         stats[name] = {
@@ -60,8 +72,22 @@ def _aggregate(rows: list[dict], baseline_sizes: dict[str, int]) -> dict[str, di
             "mean_reduction_given_pass": statistics.mean(reductions) if reductions else 0.0,
             "mean_elapsed_s": statistics.mean(elapsed) if elapsed else 0.0,
             "n_with_reduction": len(reductions),
+            "n_missing_baseline": n_missing_baseline,
         }
     return stats
+
+
+def _baseline_count_mismatch(stats: dict[str, dict]) -> dict[str, int] | None:
+    """Return ``{baseline: n}`` if baselines saw different triple counts, else None.
+
+    Every baseline should have been run over the same holdout, so a count
+    mismatch means the comparison is not apples-to-apples and the leaderboard
+    numbers are not directly comparable.
+    """
+    counts = {name: s["n"] for name, s in stats.items()}
+    if len(set(counts.values())) > 1:
+        return counts
+    return None
 
 
 def _render_markdown(stats: dict[str, dict]) -> str:
@@ -77,8 +103,9 @@ def _render_markdown(stats: dict[str, dict]) -> str:
         "",
         "Headline metric: **mean size reduction conditional on test pass**.",
         "",
-        "| Baseline | n | Test-pass rate | Mean reduction \\| pass | Mean elapsed (s) | n reductions |",
-        "|---|---:|---:|---:|---:|---:|",
+        "| Baseline | n | Test-pass rate | Mean reduction \\| pass | "
+        "Mean elapsed (s) | n reductions | n missing baseline |",
+        "|---|---:|---:|---:|---:|---:|---:|",
     ]
     for name, s in ordered:
         lines.append(
@@ -87,7 +114,8 @@ def _render_markdown(stats: dict[str, dict]) -> str:
             f"| {s['test_pass_rate']:.1%} "
             f"| {s['mean_reduction_given_pass']:.1%} "
             f"| {s['mean_elapsed_s']:.1f} "
-            f"| {s['n_with_reduction']} |"
+            f"| {s['n_with_reduction']} "
+            f"| {s['n_missing_baseline']} |"
         )
     lines.append("")
     return "\n".join(lines)
@@ -112,6 +140,14 @@ def main() -> int:
     print(f"loaded {len(baseline_sizes)} baseline sizes from {args.holdout}", file=sys.stderr)
 
     stats = _aggregate(rows, baseline_sizes)
+
+    mismatch = _baseline_count_mismatch(stats)
+    if mismatch is not None:
+        print(
+            f"MISMATCH: baselines saw different triple counts - the leaderboard is NOT apples-to-apples: {mismatch}",
+            file=sys.stderr,
+        )
+
     md = _render_markdown(stats)
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
