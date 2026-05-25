@@ -1,0 +1,32 @@
+name: quality
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('pyproject.toml') }}
+          restore-keys: ${{ runner.os }}-pip-
+      - name: Install (light - no torch/vllm)
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff mypy pytest dockerfile docker tqdm tenacity huggingface_hub anthropic openai datasets
+          pip install --no-deps -e .
+      - name: Ruff lint
+        run: ruff check src tests scripts prime_env
+      - name: Ruff format check
+        run: ruff format --check src tests scripts prime_env
+      - name: Mypy strict
+        run: mypy src tests
+      - name: Pytest (skip docker-gated)
+        run: pytest tests/ -v -m "not docker"
