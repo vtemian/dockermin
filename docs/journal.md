@@ -2,6 +2,45 @@
 
 Append per session. Last entry at top. 3-5 sentences per entry. What worked, what broke, what was not obvious.
 
+## 2026-05-25 - RESUME-AFTER-RESTART checkpoint (dataset growth mid-flight)
+
+Vlad is doing a machine restart. State captured so we lose nothing (data/ is
+gitignored = local-disk only, but survives a reboot; not backed up until the HF push).
+
+**Branch:** `feat/dataset-growth`, 3 commits ahead of main (plan + probe-bug fixes +
+broadened ecosystems + scraper retarget). Code gate green (ruff/mypy/137 tests).
+
+**Dataset state on disk (data/curated/):**
+- `triples.jsonl` = 28 distinct bases (up from 11; python-heavy: ~10 python / 5 node / 11 old-java-labelled-unknown / 1 ruby / 1 alpine)
+- `triples_with_variants.jsonl` = 120 rows = 24 bases + 96 variants, AND CLIMBING - the
+  synthetic_variants run was still going (24 of 28 bases done) when the restart happened.
+  Append-mode + startup dedup means it's safe and RESUMABLE.
+
+**TO RESUME after reboot (Docker Desktop must be back up first - `docker ps`):**
+```bash
+cd /Users/whitemonk/projects/ai/dockermin
+git checkout feat/dataset-growth
+# finish the remaining ~4 bases of variants (dedup skips the 24 already done):
+PYTHONPATH=src .venv/bin/python scripts/synthetic_variants.py \
+  --in data/curated/triples.snapshot.jsonl \
+  --out data/curated/triples_with_variants.jsonl \
+  --variants-per-base 5 --max-bases 28 --lockfile logs/variants.lock
+```
+(`triples.snapshot.jsonl` is the frozen 28-base input; the run reads it, skips existing ids.)
+
+**Then to close out Phase 4 / the dataset-growth plan:**
+1. Add a dataset-diversity note (28 bases, python-heavy - honest generalization limit).
+2. Commit journal + note on the branch -> open PR -> merge to main (CI must pass).
+3. `make quality` should stay green.
+
+**Still BLOCKED on Vlad (unchanged):** HF_TOKEN (push `vladtemian/dockermin-v0` with the
+train/test split) and Prime Intellect account + GPU budget (the entire pod-side: smoke
+tests -> pilot -> full run -> eval -> ship). The core thesis (7B GRPO LoRA vs Sonnet
+agent-loop) is still 100% untested - it needs the pod run.
+
+**Background jobs that die on reboot (all fine):** synthetic_variants (resumable above),
+any tee'd bash. No uncommitted code. Docker will need to come back up before resuming.
+
 ## 2026-05-25 (Vlad + Bot) - working-style retro + harness tuning
 
 Vlad asked for a deep analysis of how we work together. Mined the journal, memories, and the 4.7MB main session (55 subagent dispatches, 21 real human messages; the ~120 tiny uniform sessions are just synthetic-variant API calls, not conversations). Findings: Vlad directs rather than pairs — one dense up-front spec, then terse nudges, and a verbatim mantra repeated 8+ times ("spawn subagents → gather context → write detailed plan → implement"). He audits by pointed question ("why so many scripts?", "why the __future__ imports?") rather than reading diffs, and signals satisfaction by "continue", never praise.
