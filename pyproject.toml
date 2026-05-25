@@ -31,7 +31,10 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "ruff",
+  "mypy",
   "pytest",
+  "pytest-cov",
+  "pre-commit",
   "ipython",
 ]
 
@@ -146,3 +149,11 @@ module = [
     "openai.*",
 ]
 ignore_missing_imports = true
+
+[tool.coverage.run]
+source = ["src/dockermin"]
+omit = ["*/tests/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false

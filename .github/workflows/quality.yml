@@ -20,7 +20,7 @@ jobs:
       - name: Install (light - no torch/vllm)
         run: |
           python -m pip install --upgrade pip
-          pip install ruff mypy pytest dockerfile docker tqdm tenacity huggingface_hub anthropic openai datasets
+          pip install ruff mypy pytest pytest-cov dockerfile docker tqdm tenacity huggingface_hub anthropic openai datasets
           pip install --no-deps -e .
       - name: Ruff lint
         run: ruff check src tests scripts prime_env
@@ -28,5 +28,5 @@ jobs:
         run: ruff format --check src tests scripts prime_env
       - name: Mypy strict
         run: mypy src tests
-      - name: Pytest (skip docker-gated)
-        run: pytest tests/ -v -m "not docker"
+      - name: Pytest (skip docker-gated) + coverage floor
+        run: pytest tests/ -v -m "not docker" --cov=src/dockermin --cov-report=term-missing --cov-fail-under=45
