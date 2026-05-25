@@ -1,13 +1,17 @@
 """Tests for the per-Dockerfile annotate() pipeline."""
-import pytest
 import docker
+import pytest
 
 from dockermin.dataset.annotate import (
-    parse_gate, ParseResult,
-    build_gate, BuildResult,
-    run_test_gate, TestResult,
-    annotate_one, AnnotateResult,
+    AnnotateResult,
+    BuildResult,
+    ParseResult,
+    TestResult,
+    annotate_one,
+    build_gate,
     infer_test_cmd,
+    parse_gate,
+    run_test_gate,
 )
 
 DOCKER_AVAILABLE = False

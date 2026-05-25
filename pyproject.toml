@@ -46,5 +46,95 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.ruff]
-line-length = 100
+line-length = 120
+indent-width = 4
 target-version = "py311"
+exclude = [".git", ".ruff_cache", ".venv", "data", "logs"]
+
+[tool.ruff.lint]
+select = [
+    "F",        # pyflakes
+    "E", "W",   # pycodestyle
+    "I",        # isort
+    "B",        # flake8-bugbear
+    "C4",       # flake8-comprehensions
+    "UP",       # pyupgrade
+    "SIM",      # flake8-simplify
+    "S",        # flake8-bandit
+    "T20",      # flake8-print
+    "N",        # pep8-naming
+    "ANN",      # flake8-annotations
+    "A",        # flake8-builtins
+    "ARG",      # flake8-unused-arguments
+    "ERA",      # eradicate (commented-out code)
+    "PLR",      # pylint refactor
+    "PLW",      # pylint warnings
+    "PLE",      # pylint errors
+    "PERF",     # perflint
+    "RUF",      # ruff-specific
+    "TRY",      # tryceratops
+    "BLE",      # flake8-blind-except
+    "EM",       # flake8-errmsg
+    "C90",      # mccabe complexity
+    "RET",      # flake8-return
+    "TCH",      # flake8-type-checking
+    "PIE",      # flake8-pie
+]
+ignore = [
+    "S101",     # assert in tests
+    "S311",     # pseudo-random (non-crypto: hash suffixes, seeds)
+    "ANN204",   # missing return type for __init__
+    "TRY003",   # long exception messages are fine
+    "EM101",    # raw string in exception
+    "EM102",    # f-string in exception
+    "RET504",   # unnecessary assignment before return — readability choice
+]
+fixable = ["ALL"]
+unfixable = []
+
+[tool.ruff.lint.mccabe]
+max-complexity = 5
+
+[tool.ruff.lint.pylint]
+max-branches = 4
+max-returns = 4
+max-statements = 15
+
+[tool.ruff.lint.per-file-ignores]
+# Tests: relax annotations, unused args, magic values, long functions, asserts
+"tests/*.py" = ["ANN", "ARG", "PLR2004", "PLR0915", "S101", "S105", "S106"]
+# Operational scripts are CLI entrypoints: print is the UI, they shell out to
+# docker/gh/claude, and they orchestrate (longer functions, more branches).
+"scripts/*.py" = ["T20", "S603", "S607", "ANN", "PLR0912", "PLR0913", "PLR0915", "C901", "BLE001"]
+# CLI module: prints results to stdout by design, lazy heavy imports inside main
+"src/dockermin/cli.py" = ["T201", "PLC0415"]
+# prime-rl environment package: thin adapter
+"prime_env/*.py" = ["ANN"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.mypy]
+strict = true
+python_version = "3.11"
+files = ["src", "tests"]
+exclude = ["data/", "logs/", "\\.venv/"]
+
+[[tool.mypy.overrides]]
+module = [
+    "dockerfile.*",
+    "docker.*",
+    "vllm.*",
+    "verifiers.*",
+    "peft.*",
+    "transformers.*",
+    "datasets.*",
+    "huggingface_hub.*",
+    "wandb.*",
+    "anthropic.*",
+    "openai.*",
+]
+ignore_missing_imports = true

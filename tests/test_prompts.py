@@ -1,7 +1,9 @@
 """Tests for prompt template and extractor."""
 from dockermin.reward.prompts import (
-    SYSTEM_PROMPT, USER_TEMPLATE, format_messages, extract_dockerfile,
+    extract_dockerfile,
+    format_messages,
 )
+
 
 def test_extract_dockerfile_from_fenced_block():
     text = """Sure, here is the optimized Dockerfile:
@@ -28,5 +30,5 @@ def test_extract_dockerfile_returns_none_on_no_fence():
 
 def test_format_messages_includes_dockerfile_and_test_cmd():
     msgs = format_messages("FROM python\n", ["python","-c","print('ok')"], "ok")
-    assert any("system" == m["role"] for m in msgs)
+    assert any(m["role"] == "system" for m in msgs)
     assert any("python" in m["content"] for m in msgs)

@@ -1,6 +1,8 @@
 """Reward scoring: gates -> dense -> shape. Pure function for testability."""
 from __future__ import annotations
+
 import re
+
 
 def compute_score(*, parse_ok: bool, build_ok: bool, test_ok: bool,
                   command_count: int, baseline_size: int, new_size: int,

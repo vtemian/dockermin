@@ -1,9 +1,12 @@
 """Dockermin verifiers Environment for prime-rl. Single-turn: prompt -> Dockerfile -> reward."""
 from __future__ import annotations
+
 import verifiers as vf
 from datasets import load_dataset
-from dockermin.reward.prompts import SYSTEM_PROMPT, USER_TEMPLATE
+
 from dockermin.reward.dockermin_reward import dockermin_reward
+from dockermin.reward.prompts import SYSTEM_PROMPT, USER_TEMPLATE
+
 
 def load_environment(**kwargs) -> vf.Environment:
     ds = load_dataset("vladtemian/dockermin-v0", split="train")

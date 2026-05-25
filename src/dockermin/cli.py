@@ -1,8 +1,13 @@
 """dockermin <dockerfile_path> --test '<cmd>' --expect <substring> --model <hf_id>"""
 from __future__ import annotations
-import argparse, shlex, sys
+
+import argparse
+import shlex
+import sys
 from pathlib import Path
-from .reward.prompts import format_messages, extract_dockerfile
+
+from .reward.prompts import extract_dockerfile, format_messages
+
 
 def main() -> int:
     p = argparse.ArgumentParser()
@@ -14,8 +19,8 @@ def main() -> int:
     df = args.dockerfile.read_text()
     msgs = format_messages(df, shlex.split(args.test), args.expect)
     # Inference: load base Qwen + LoRA via vllm or HF transformers. For CLI ship the simpler HF path.
-    from transformers import AutoTokenizer, AutoModelForCausalLM
     from peft import PeftModel
+    from transformers import AutoModelForCausalLM, AutoTokenizer
     tok = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-Coder-7B-Instruct")
     base = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2.5-Coder-7B-Instruct", torch_dtype="bfloat16", device_map="auto")
     model = PeftModel.from_pretrained(base, args.model)

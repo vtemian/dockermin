@@ -3,6 +3,7 @@ import pytest
 
 from dockermin.reward.gates import compute_score
 
+
 def test_compute_score_parse_fail_returns_minus_point_1():
     s = compute_score(parse_ok=False, build_ok=False, test_ok=False,
                       command_count=0, baseline_size=100, new_size=0, dockerfile_text="")

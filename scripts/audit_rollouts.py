@@ -1,7 +1,10 @@
 """Pull 20 random rollouts from the latest checkpoint, eyeball reward-hacking patterns."""
 from __future__ import annotations
-import random, re, json
+
+import json
+import random
 from pathlib import Path
+
 
 def audit(rollouts_dir: Path) -> dict:
     files = list(rollouts_dir.glob("*.jsonl"))

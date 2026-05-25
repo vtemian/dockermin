@@ -1,9 +1,9 @@
 """Tests for the dockermin_reward wiring."""
 import pytest
 
+from dockermin.dataset.annotate import BuildResult, ParseResult, TestResult
 from dockermin.reward import dockermin_reward as dr_mod
 from dockermin.reward.dockermin_reward import dockermin_reward
-from dockermin.dataset.annotate import BuildResult, ParseResult, TestResult
 
 
 def test_dockermin_reward_garbage_completion_returns_negative():

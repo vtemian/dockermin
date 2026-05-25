@@ -1,8 +1,10 @@
 """Top-level reward function. Signature matches verifiers Rubric inspection."""
 from __future__ import annotations
-from .prompts import extract_dockerfile
+
+from dockermin.dataset.annotate import build_gate, parse_gate, run_test_gate
+
 from .gates import compute_score
-from dockermin.dataset.annotate import parse_gate, build_gate, run_test_gate
+from .prompts import extract_dockerfile
 
 
 def _completion_text(completion) -> str:

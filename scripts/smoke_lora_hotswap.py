@@ -1,8 +1,12 @@
 # scripts/smoke_lora_hotswap.py
 """Verify vLLM 0.7.3 LoRA hotswap on Qwen 2.5 Coder 7B before committing to GRPO pipeline."""
 from __future__ import annotations
-import os, sys, tempfile, time
+
+import sys
+import tempfile
+import time
 from pathlib import Path
+
 import torch
 from peft import LoraConfig, get_peft_model
 from transformers import AutoModelForCausalLM, AutoTokenizer

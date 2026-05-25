@@ -1,5 +1,6 @@
 """Prompt template and Dockerfile extraction for Dockermin GRPO."""
 from __future__ import annotations
+
 import re
 
 SYSTEM_PROMPT = (

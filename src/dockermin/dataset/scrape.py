@@ -7,8 +7,8 @@ import subprocess
 import sys
 import time
 import urllib.request
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 # Small pause between gh calls to keep us under secondary rate limits.
 GH_SLEEP_S = 0.5

@@ -17,15 +17,15 @@ verification on the GPU pod).
 from __future__ import annotations
 
 import json
-import os
 import re
 import shutil
 import subprocess
 import tempfile
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import anthropic
 import openai
@@ -38,7 +38,6 @@ from tenacity import (
 
 from dockermin.dataset.annotate import annotate_one
 from dockermin.reward.prompts import extract_dockerfile, format_messages
-
 
 # Narrow retry policies for the two API-only baselines. Transient connection
 # blips and rate limits are worth a few exponential-backoff retries; docker
@@ -129,8 +128,8 @@ def _vllm_qwen():
     """Lazy-load vLLM and the base Qwen model. GPU-only."""
     if "llm" in _VLLM_HANDLE:
         return _VLLM_HANDLE["llm"], _VLLM_HANDLE["tok"]
-    from vllm import LLM  # lazy: only available on GPU pod
     from transformers import AutoTokenizer
+    from vllm import LLM  # lazy: only available on GPU pod
     model_id = "Qwen/Qwen2.5-Coder-7B-Instruct"
     _VLLM_HANDLE["llm"] = LLM(model=model_id, dtype="bfloat16", gpu_memory_utilization=0.85)
     _VLLM_HANDLE["tok"] = AutoTokenizer.from_pretrained(model_id)
@@ -372,9 +371,8 @@ def baseline_slim(triple: dict) -> EvalEntry:
     t0 = time.perf_counter()
     workdir: Path | None = None
     try:
-        import docker  # lazy; we only need the client here
         from dockermin.dataset.annotate import (
-            _docker_client,  # noqa: WPS437  reusing the configured client
+            _docker_client,
             build_gate,
             run_test_gate,
         )
