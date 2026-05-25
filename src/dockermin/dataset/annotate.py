@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import re
 import subprocess
 import tempfile
 import time
@@ -215,24 +216,89 @@ def annotate_one(  # noqa: PLR0913 — parse/build/test gate inputs + per-gate t
     return AnnotateResult(ok=True, baseline_size=b.size_bytes, baseline_build_s=b.build_seconds, tag=b.tag)
 
 
-# Ordered ecosystem detectors: first matching keyword set wins.
-# java -version writes to stderr; the openjdk/temurin runtime always prints a
-# line starting with "openjdk"/"OpenJDK", so we match on that substring.
+# Runtime probes that require the real interpreter/runtime to exist inside the
+# built image. The probe runs INSIDE the image, so a `FROM scratch + RUN echo`
+# cheat (no interpreter) exits non-zero and fails the gate - the model cannot
+# satisfy a runtime import by echoing a constant at build time.
 #
-# Golang is intentionally absent: /app/server would be a guess and we cannot
-# give an empty expected (reward-hacking surface), so go images fall through to
-# (None, None) and the bulk annotator skips them without a meaningful test.
-_TEST_CMD_BY_ECOSYSTEM: tuple[tuple[tuple[str, ...], list[str], str], ...] = (
-    (("from python", "pip install"), ["python", "-c", "import sys;print('ok',sys.version_info[:2])"], "ok"),
-    (("from node", "npm install"), ["node", "-e", "console.log('ok',process.version)"], "ok"),
-    (("from openjdk", "from eclipse-temurin"), ["java", "-version"], "openjdk"),
-)
+# python: import the installed package, fall back to a stdlib module when the
+#   package is unknown, then print a marker. The import requires a python
+#   interpreter -> a scratch image fails.
+# node: require the installed module + print a marker; a missing module exits
+#   non-zero, so the require itself is the runtime check.
+# java: `java -version` already needs the JRE; the openjdk/temurin runtime
+#   prints a line starting with "openjdk"/"OpenJDK" on stderr.
+#
+# Golang is intentionally absent: we cannot synthesize a safe runtime probe
+# (the entrypoint binary path is a guess and an empty expected is a
+# reward-hacking surface), so go images fall through to (None, None) and the
+# bulk annotator skips them.
+_PYTHON_MARKER = "PYOK"
+_NODE_MARKER = "NODEOK"
+
+# A python module that always exists in any CPython runtime, used when the
+# Dockerfile names no pip-installable package we can import.
+_PYTHON_STDLIB_FALLBACK = "json"
+
+# Pull the first non-flag token after `pip install` / `npm install` so the probe
+# imports a package that this Dockerfile actually installs.
+_PIP_INSTALL_RE = re.compile(r"pip(?:3)?\s+install\s+((?:-[^\s]+\s+)*)([^\s]+)", re.IGNORECASE)
+_NPM_INSTALL_RE = re.compile(r"npm\s+(?:install|i|add)\s+((?:-[^\s]+\s+)*)([^\s]+)", re.IGNORECASE)
+
+
+def _first_pip_package(text: str) -> str | None:
+    """First pip-installed package name (without version/extras), or None."""
+    m = _PIP_INSTALL_RE.search(text)
+    if not m:
+        return None
+    token = m.group(2)
+    # Strip version specifiers and extras: "flask==3.0", "uvicorn[standard]".
+    name = re.split(r"[=<>!~\[]", token, maxsplit=1)[0].strip()
+    # Distribution names use hyphens; the import name uses underscores.
+    return name.replace("-", "_") or None
+
+
+def _first_npm_package(text: str) -> str | None:
+    """First npm-installed module name, or None."""
+    m = _NPM_INSTALL_RE.search(text)
+    if not m:
+        return None
+    token = m.group(2)
+    # Drop a trailing @version (keep a leading @scope/name intact).
+    if token.startswith("@"):
+        scope, _, rest = token.partition("/")
+        name = f"{scope}/{rest.split('@', 1)[0]}" if rest else scope
+    else:
+        name = token.split("@", 1)[0]
+    return name or None
+
+
+def _python_probe(text: str) -> tuple[list[str], str]:
+    package = _first_pip_package(text) or _PYTHON_STDLIB_FALLBACK
+    code = f"import sys,importlib; importlib.import_module('{package}'); print('{_PYTHON_MARKER}', sys.version_info[0])"
+    return (["python", "-c", code], _PYTHON_MARKER)
+
+
+def _node_probe(text: str) -> tuple[list[str], str]:
+    module = _first_npm_package(text)
+    if module is None:
+        return (["node", "-e", f"console.log('{_NODE_MARKER}', process.version)"], _NODE_MARKER)
+    code = f"require('{module}'); console.log('{_NODE_MARKER}', process.version)"
+    return (["node", "-e", code], _NODE_MARKER)
 
 
 def infer_test_cmd(df_text: str) -> tuple[list[str] | None, str | None]:
-    """Best-effort default test_cmd per ecosystem. Returns (None, None) if unknown."""
+    """Best-effort runtime probe per ecosystem. Returns (None, None) if unknown.
+
+    The probe imports/requires a real package and prints a marker, so it
+    requires the interpreter/runtime to exist inside the built image - a
+    `RUN echo` cheat at build time cannot satisfy a runtime import probe.
+    """
     text = df_text.lower()
-    for keywords, cmd, expected in _TEST_CMD_BY_ECOSYSTEM:
-        if any(keyword in text for keyword in keywords):
-            return (cmd, expected)
+    if "from python" in text or "pip install" in text:
+        return _python_probe(text)
+    if "from node" in text or "npm install" in text:
+        return _node_probe(text)
+    if "from openjdk" in text or "from eclipse-temurin" in text:
+        return (["java", "-version"], "openjdk")
     return (None, None)
