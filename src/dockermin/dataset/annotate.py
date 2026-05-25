@@ -10,10 +10,14 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import docker
 import dockerfile
 from docker.errors import APIError, NotFound
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 MIN_COMMANDS = 2
 
@@ -228,13 +232,16 @@ def annotate_one(  # noqa: PLR0913 — parse/build/test gate inputs + per-gate t
 #   non-zero, so the require itself is the runtime check.
 # java: `java -version` already needs the JRE; the openjdk/temurin runtime
 #   prints a line starting with "openjdk"/"OpenJDK" on stderr.
-#
-# Golang is intentionally absent: we cannot synthesize a safe runtime probe
-# (the entrypoint binary path is a guess and an empty expected is a
-# reward-hacking surface), so go images fall through to (None, None) and the
-# bulk annotator skips them.
+# go/ruby/php/rust: a toolchain/interpreter version check is the floor. Each
+#   needs the real toolchain inside the image (`go version`, `ruby -e`,
+#   `php -r`, `rustc --version`), so a `FROM scratch + RUN echo` cheat lacking
+#   the toolchain exits non-zero and fails the gate. Where a package is named
+#   (ruby `gem install`) the import layer still applies; go/php/rust have no
+#   cheap generic import, so the version marker is the floor.
 _PYTHON_MARKER = "PYOK"
 _NODE_MARKER = "NODEOK"
+_RUBY_MARKER = "RUBYOK"
+_PHP_MARKER = "PHPOK"
 
 # A python module that always exists in any CPython runtime, used when the
 # Dockerfile names no pip-installable package we can import.
@@ -243,7 +250,40 @@ _PYTHON_STDLIB_FALLBACK = "json"
 # Pull the first non-flag token after `pip install` / `npm install` so the probe
 # imports a package that this Dockerfile actually installs.
 _PIP_INSTALL_RE = re.compile(r"pip(?:3)?\s+install\s+((?:-[^\s]+\s+)*)([^\s]+)", re.IGNORECASE)
-_NPM_INSTALL_RE = re.compile(r"npm\s+(?:install|i|add)\s+((?:-[^\s]+\s+)*)([^\s]+)", re.IGNORECASE)
+# Anchor the npm match to a single line (`[^\S\n]` = horizontal whitespace) so
+# the flag-skip group cannot consume a newline and grab the next Dockerfile
+# instruction (e.g. COPY) as the package name.
+_NPM_INSTALL_RE = re.compile(
+    r"npm[^\S\n]+(?:install|i|add)((?:[^\S\n]+-[^\s]+)*)(?:[^\S\n]+([^\s]+))?",
+    re.IGNORECASE,
+)
+# First non-flag token after `gem install`, anchored to the same line.
+_GEM_INSTALL_RE = re.compile(r"gem[^\S\n]+install(?:[^\S\n]+-[^\s]+)*(?:[^\S\n]+([^\s]+))?", re.IGNORECASE)
+
+# Dockerfile instruction keywords that must never be mistaken for a package
+# name when a bare `npm install` is followed by another instruction.
+_DOCKERFILE_KEYWORDS = frozenset(
+    {
+        "from",
+        "run",
+        "cmd",
+        "copy",
+        "add",
+        "env",
+        "arg",
+        "workdir",
+        "entrypoint",
+        "expose",
+        "label",
+        "user",
+        "volume",
+        "onbuild",
+        "healthcheck",
+        "shell",
+        "stopsignal",
+        "maintainer",
+    }
+)
 
 
 def _first_pip_package(text: str) -> str | None:
@@ -251,26 +291,41 @@ def _first_pip_package(text: str) -> str | None:
     m = _PIP_INSTALL_RE.search(text)
     if not m:
         return None
-    token = m.group(2)
+    token = m.group(2).strip("'\"")
     # Strip version specifiers and extras: "flask==3.0", "uvicorn[standard]".
-    name = re.split(r"[=<>!~\[]", token, maxsplit=1)[0].strip()
+    name = re.split(r"[=<>!~\[]", token, maxsplit=1)[0].strip().strip("'\"")
     # Distribution names use hyphens; the import name uses underscores.
     return name.replace("-", "_") or None
 
 
+def _strip_npm_version(token: str) -> str:
+    """Drop a trailing @version, keeping a leading @scope/name intact."""
+    if token.startswith("@"):
+        scope, _, rest = token.partition("/")
+        return f"{scope}/{rest.split('@', 1)[0]}" if rest else scope
+    return token.split("@", 1)[0]
+
+
 def _first_npm_package(text: str) -> str | None:
-    """First npm-installed module name, or None."""
+    """First require-able npm module name on the same line as `npm install`.
+
+    Returns None (caller falls back to a version-marker probe) when:
+    - there is no package token (bare `npm install` from package.json),
+    - the next token is a Dockerfile instruction keyword (the bare install was
+      followed by COPY/RUN/... on the next line),
+    - the install carries `-g`/`--global` (global modules are not on the bare
+      `require()` path).
+    """
     m = _NPM_INSTALL_RE.search(text)
     if not m:
         return None
+    flags = m.group(1) or ""
+    if re.search(r"(?:^|\s)(?:-g|--global)(?:\s|$)", flags):
+        return None
     token = m.group(2)
-    # Drop a trailing @version (keep a leading @scope/name intact).
-    if token.startswith("@"):
-        scope, _, rest = token.partition("/")
-        name = f"{scope}/{rest.split('@', 1)[0]}" if rest else scope
-    else:
-        name = token.split("@", 1)[0]
-    return name or None
+    if token is None or token.lower() in _DOCKERFILE_KEYWORDS:
+        return None
+    return _strip_npm_version(token) or None
 
 
 def _python_probe(text: str) -> tuple[list[str], str]:
@@ -287,18 +342,92 @@ def _node_probe(text: str) -> tuple[list[str], str]:
     return (["node", "-e", code], _NODE_MARKER)
 
 
+def _first_gem_package(text: str) -> str | None:
+    """First non-flag token after `gem install`, or None."""
+    m = _GEM_INSTALL_RE.search(text)
+    if not m:
+        return None
+    token = m.group(1)
+    if token is None or token.lower() in _DOCKERFILE_KEYWORDS:
+        return None
+    name = token.strip("'\"").split(":", 1)[0]
+    return name or None
+
+
+def _ruby_probe(text: str) -> tuple[list[str], str]:
+    gem = _first_gem_package(text)
+    if gem is None:
+        return (["ruby", "-e", f"puts '{_RUBY_MARKER}', RUBY_VERSION"], _RUBY_MARKER)
+    # Require the installed gem, then print the marker; the require needs the
+    # ruby runtime, so a toolchain-less image fails.
+    code = f"require '{gem}'; puts '{_RUBY_MARKER}', RUBY_VERSION"
+    return (["ruby", "-e", code], _RUBY_MARKER)
+
+
+def _go_probe() -> tuple[list[str], str]:
+    return (["go", "version"], "go version")
+
+
+def _php_probe() -> tuple[list[str], str]:
+    return (["php", "-r", f"echo '{_PHP_MARKER}', PHP_VERSION;"], _PHP_MARKER)
+
+
+def _rust_probe() -> tuple[list[str], str]:
+    return (["rustc", "--version"], "rustc")
+
+
+# Ecosystem resolution, ordered by strength of evidence. RUN installer signals
+# come first (a generic debian/ubuntu/alpine base that `pip install`s exercises
+# python at runtime); FROM hints are the fallback. Each entry is a compiled
+# regex matched against the lowercased Dockerfile. `\bgo` keeps `cargo build`
+# from matching the go signal.
+_ECOSYSTEM_SIGNALS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"pip3?\s+install"), "python"),
+    (re.compile(r"npm\s+(?:install|i|add)\b"), "node"),
+    (re.compile(r"gem\s+install"), "ruby"),
+    (re.compile(r"cargo\s+(?:build|install|run)"), "rust"),
+    (re.compile(r"\bgo\s+(?:build|install|run)\b"), "go"),
+    (re.compile(r"composer"), "php"),
+    (re.compile(r"from\s+python"), "python"),
+    (re.compile(r"from\s+node"), "node"),
+    (re.compile(r"from\s+(?:openjdk|eclipse-temurin)"), "java"),
+    (re.compile(r"from\s+ruby"), "ruby"),
+    (re.compile(r"from\s+php"), "php"),
+    (re.compile(r"from\s+golang"), "go"),
+    (re.compile(r"from\s+rust"), "rust"),
+)
+
+
+def _ecosystem(text: str) -> str | None:
+    """Resolve the ecosystem from FROM and RUN installer signals (or None)."""
+    for pattern, eco in _ECOSYSTEM_SIGNALS:
+        if pattern.search(text):
+            return eco
+    return None
+
+
+# Probe builders per ecosystem. Each runs INSIDE the built image and needs the
+# real interpreter/toolchain, so a `RUN echo` cheat cannot satisfy it.
+_PROBE_BUILDERS: dict[str, Callable[[str], tuple[list[str], str]]] = {
+    "python": _python_probe,
+    "node": _node_probe,
+    "ruby": _ruby_probe,
+    "java": lambda _text: (["java", "-version"], "openjdk"),
+    "php": lambda _text: _php_probe(),
+    "go": lambda _text: _go_probe(),
+    "rust": lambda _text: _rust_probe(),
+}
+
+
 def infer_test_cmd(df_text: str) -> tuple[list[str] | None, str | None]:
     """Best-effort runtime probe per ecosystem. Returns (None, None) if unknown.
 
-    The probe imports/requires a real package and prints a marker, so it
-    requires the interpreter/runtime to exist inside the built image - a
-    `RUN echo` cheat at build time cannot satisfy a runtime import probe.
+    The probe imports/requires a real package or invokes the toolchain and
+    prints a marker, so it requires the interpreter/runtime to exist inside the
+    built image - a `RUN echo` cheat at build time cannot satisfy it.
     """
     text = df_text.lower()
-    if "from python" in text or "pip install" in text:
-        return _python_probe(text)
-    if "from node" in text or "npm install" in text:
-        return _node_probe(text)
-    if "from openjdk" in text or "from eclipse-temurin" in text:
-        return (["java", "-version"], "openjdk")
-    return (None, None)
+    eco = _ecosystem(text)
+    if eco is None:
+        return (None, None)
+    return _PROBE_BUILDERS[eco](text)

@@ -6,6 +6,7 @@ from dockermin.dataset.scrape import (
     _ecosystem_from_dockerfile,
     _infer_ecosystem,
     _is_new_content,
+    _is_self_contained_probeable,
     _manifest_raw_url,
     _merge_stanza,
     _parse_manifest_stanzas,
@@ -252,6 +253,78 @@ def test_ecosystem_from_dockerfile_bare_from_returns_unknown() -> None:
     # A FROM line with no base ref has too few parts.
     df = "FROM "
     assert _ecosystem_from_dockerfile(df) == "unknown"
+
+
+def test_ecosystem_from_dockerfile_golang_base() -> None:
+    df = "FROM golang:1.22\nRUN go build ./...\n"
+    assert _ecosystem_from_dockerfile(df) == "go"
+
+
+def test_ecosystem_from_dockerfile_resolves_from_pip_run_line() -> None:
+    # A generic debian base with a pip install resolves to python, not unknown.
+    df = "FROM debian:bookworm\nRUN apt-get install -y python3-pip && pip install flask\n"
+    assert _ecosystem_from_dockerfile(df) == "python"
+
+
+def test_ecosystem_from_dockerfile_resolves_from_npm_run_line() -> None:
+    df = "FROM ubuntu:22.04\nRUN npm install express\n"
+    assert _ecosystem_from_dockerfile(df) == "node"
+
+
+def test_ecosystem_from_dockerfile_resolves_from_gem_run_line() -> None:
+    df = "FROM debian:bookworm\nRUN gem install rails\n"
+    assert _ecosystem_from_dockerfile(df) == "ruby"
+
+
+def test_ecosystem_from_dockerfile_resolves_from_composer_run_line() -> None:
+    df = "FROM debian:bookworm\nRUN composer install\n"
+    assert _ecosystem_from_dockerfile(df) == "php"
+
+
+def test_ecosystem_from_dockerfile_resolves_from_go_build_run_line() -> None:
+    df = "FROM alpine:3.20\nRUN go build ./...\n"
+    assert _ecosystem_from_dockerfile(df) == "go"
+
+
+def test_ecosystem_from_dockerfile_from_takes_precedence_when_known() -> None:
+    # A known runtime FROM wins; the RUN-line fallback only kicks in for
+    # generic/unknown bases.
+    df = "FROM golang:1.22\nRUN pip install something\n"
+    assert _ecosystem_from_dockerfile(df) == "go"
+
+
+# --- _is_self_contained_probeable ---------------------------------------------
+
+
+def test_self_contained_clean_pip_dockerfile_is_true() -> None:
+    assert _is_self_contained_probeable("FROM python:3.12\nRUN pip install flask\n") is True
+
+
+def test_self_contained_rejects_copy() -> None:
+    df = "FROM python:3.12\nCOPY . /app\nRUN pip install -r reqs\n"
+    assert _is_self_contained_probeable(df) is False
+
+
+def test_self_contained_rejects_local_add() -> None:
+    assert _is_self_contained_probeable("FROM scratch\nADD x.tar /\n") is False
+
+
+def test_self_contained_allows_add_http_url() -> None:
+    # A remote ADD fetches over the network, so it does not need a local build
+    # context. The Dockerfile must still resolve to a known ecosystem.
+    df = "FROM python:3.12\nADD https://example.com/x.tar /tmp/\nRUN pip install flask\n"
+    assert _is_self_contained_probeable(df) is True
+
+
+def test_self_contained_rejects_unknown_ecosystem() -> None:
+    df = "FROM mystery-base:1.0\nRUN make\n"
+    assert _is_self_contained_probeable(df) is False
+
+
+def test_self_contained_copy_match_is_anchored_to_instruction() -> None:
+    # A 'COPY' appearing inside a comment or word should not trip the gate.
+    df = "FROM python:3.12\n# we deliberately avoid COPYing the repo\nRUN pip install flask\n"
+    assert _is_self_contained_probeable(df) is True
 
 
 # --- _is_new_content ----------------------------------------------------------

@@ -148,10 +148,75 @@ def test_infer_test_cmd_java_keeps_jre_probe() -> None:
     assert expected == "openjdk"
 
 
-def test_infer_test_cmd_go_returns_none() -> None:
-    """Go: we cannot synthesize a safe runtime probe, so drop the triple."""
-    cmd, expected = infer_test_cmd("FROM golang:1.22\nRUN go build -o /server\n")
-    assert cmd is None and expected is None
+def test_first_pip_package_strips_quotes() -> None:
+    """A quoted pip spec (`pip install "hy == 1.0"`) must not leak the leading
+    quote into the import name (`import_module('"hy')`)."""
+    cmd, _ = infer_test_cmd('FROM python:3.12\nRUN pip install "hy == 1.0"\n')
+    assert cmd is not None
+    joined = " ".join(cmd)
+    assert "'\"hy'" not in joined and '"hy' not in joined
+    assert "import_module('hy')" in joined or "'hy'" in joined
+
+
+def test_npm_bare_install_falls_back_to_version_marker() -> None:
+    """`npm install` with no package (install-from-package.json) must NOT grab
+    the next Dockerfile line (COPY) as the module name."""
+    cmd, expected = infer_test_cmd("FROM node:20\nRUN npm install\nCOPY . .\n")
+    assert cmd is not None
+    joined = " ".join(cmd)
+    assert "COPY" not in joined and "copy" not in joined
+    assert "require(" not in joined
+    assert expected == "NODEOK"  # version-marker fallback
+
+
+def test_npm_global_install_uses_version_marker() -> None:
+    """`npm install -g X` installs a global module not on the bare require()
+    path, so the probe falls back to the version marker."""
+    cmd, expected = infer_test_cmd("FROM node:20\nRUN npm install -g tough-cookie\n")
+    assert cmd is not None
+    assert "require(" not in " ".join(cmd)  # falls back, doesn't require() a global
+    assert expected == "NODEOK"
+
+
+def test_infer_test_cmd_go() -> None:
+    """Go now returns a toolchain probe; `go version` needs the go toolchain
+    present, which a `FROM scratch + RUN echo` cheat lacks."""
+    cmd, expected = infer_test_cmd("FROM golang:1.22\nRUN go build ./...\n")
+    assert cmd is not None and cmd[0] == "go" and expected == "go version"
+
+
+def test_infer_test_cmd_ruby() -> None:
+    cmd, expected = infer_test_cmd("FROM ruby:3.3\nRUN gem install rails\n")
+    assert cmd is not None and cmd[0] == "ruby" and expected == "RUBYOK"
+
+
+def test_infer_test_cmd_php() -> None:
+    cmd, expected = infer_test_cmd("FROM php:8.3\nRUN docker-php-ext-install pdo\n")
+    assert cmd is not None and cmd[0] == "php" and expected == "PHPOK"
+
+
+def test_infer_test_cmd_rust() -> None:
+    cmd, expected = infer_test_cmd("FROM rust:1.78\nRUN cargo build --release\n")
+    assert cmd is not None and cmd[0] == "rustc" and expected == "rustc"
+
+
+def test_ecosystem_from_run_line_not_just_from() -> None:
+    """A generic debian base that `pip install`s must resolve to python, not
+    fall through to (None, None)."""
+    cmd, expected = infer_test_cmd("FROM debian:bookworm\nRUN apt-get install -y python3-pip && pip install flask\n")
+    assert cmd is not None and cmd[0] == "python"
+    assert expected == "PYOK"
+
+
+def test_ecosystem_from_run_line_gem_resolves_ruby() -> None:
+    """A generic ubuntu base that `gem install`s must resolve to ruby."""
+    cmd, expected = infer_test_cmd("FROM ubuntu:24.04\nRUN gem install sinatra\n")
+    assert cmd is not None and cmd[0] == "ruby" and expected == "RUBYOK"
+
+
+def test_ecosystem_from_run_line_go_build_resolves_go() -> None:
+    cmd, expected = infer_test_cmd("FROM alpine:3.20\nRUN go build ./...\n")
+    assert cmd is not None and cmd[0] == "go" and expected == "go version"
 
 
 def test_infer_test_cmd_falls_back_to_none_on_unknown() -> None:
