@@ -10,7 +10,8 @@ from dockermin.reward.prompts import SYSTEM_PROMPT, USER_TEMPLATE
 
 
 def load_environment(**_kwargs) -> vf.Environment:
-    ds = load_dataset("vladtemian/dockermin-v0", split="train")
+    train_ds = load_dataset("vladtemian/dockermin-v0", split="train")
+    eval_ds = load_dataset("vladtemian/dockermin-v0", split="test")
 
     def fmt(ex):
         return {
@@ -18,11 +19,7 @@ def load_environment(**_kwargs) -> vf.Environment:
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {
                     "role": "user",
-                    "content": USER_TEMPLATE.format(
-                        dockerfile=ex["dockerfile"],
-                        test_cmd=" ".join(ex["test_cmd"]),
-                        expected=ex["expected_substring"],
-                    ),
+                    "content": USER_TEMPLATE.format(dockerfile=ex["dockerfile"]),
                 },
             ],
             "info": {
@@ -33,8 +30,11 @@ def load_environment(**_kwargs) -> vf.Environment:
             "answer": "",  # not used for free-form reward
         }
 
-    ds = ds.map(fmt, remove_columns=[c for c in ds.column_names if c not in ("prompt", "info", "answer")])
+    def _project(ds):
+        return ds.map(fmt, remove_columns=[c for c in ds.column_names if c not in ("prompt", "info", "answer")])
+
     return vf.SingleTurnEnv(
-        dataset=ds,
+        dataset=_project(train_ds),
+        eval_dataset=_project(eval_ds),
         rubric=vf.Rubric(funcs=[dockermin_reward], weights=[1.0]),
     )

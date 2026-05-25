@@ -5,8 +5,9 @@ Usage:
         --baselines qwen_zs gpt4o sonnet_zs hadolint slim manual agent_loop dockermin \
         --out data/eval/results.jsonl
 
-The holdout defaults to the ``test`` split of ``vladtemian/dockermin-v0``. If the
-dataset has no explicit test split, the last 150 rows of ``train`` are used.
+The holdout is the ``test`` split of ``vladtemian/dockermin-v0``. If the
+dataset has no ``test`` split we fail loudly rather than silently evaluating
+on training data.
 """
 
 from __future__ import annotations
@@ -28,19 +29,23 @@ from dockermin.eval.baselines import (
     run_one,
 )
 
-_HOLDOUT_TAIL = 150
-
 
 def _load_holdout(repo_id: str) -> list[dict]:
-    """Return a list of triple dicts. Prefer an explicit ``test`` split; else
-    fall back to the last ``_HOLDOUT_TAIL`` rows of ``train``."""
+    """Return the triple dicts of the disjoint ``test`` split.
+
+    There is NO fallback to training rows: evaluating on data the model
+    trained on would silently inflate the result. If the dataset has no
+    ``test`` split we raise so the operator fixes the dataset push instead.
+    """
     ds = load_dataset(repo_id)
-    if "test" in ds:
-        return list(ds["test"])
-    train = ds["train"]
-    n = len(train)
-    start = max(0, n - _HOLDOUT_TAIL)
-    return [train[i] for i in range(start, n)]
+    if "test" not in ds:
+        msg = (
+            f"{repo_id} has no 'test' split (found: {sorted(ds.keys())}). "
+            "Refusing to evaluate on training data - push a grouped train/test "
+            "split first (see scripts/push_to_hf.py)."
+        )
+        raise SystemExit(msg)
+    return list(ds["test"])
 
 
 # Retry policy lives inside the API-only baselines (gpt4o, sonnet_zs) where

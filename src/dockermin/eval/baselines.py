@@ -156,7 +156,7 @@ def baseline_qwen_zero_shot(triple: dict[str, Any]) -> EvalEntry:
     """Base Qwen 2.5 Coder 7B with the standard prompt, no fine-tuning."""
     t0 = time.perf_counter()
     try:
-        msgs = format_messages(triple["dockerfile"], triple["test_cmd"], triple.get("expected_substring", ""))
+        msgs = format_messages(triple["dockerfile"])
         text = _vllm_generate(msgs)
         new_df = extract_dockerfile(text)
         if new_df is None:
@@ -197,7 +197,7 @@ def _openai_chat(
 def baseline_gpt4o(triple: dict[str, Any]) -> EvalEntry:
     t0 = time.perf_counter()
     try:
-        msgs = format_messages(triple["dockerfile"], triple["test_cmd"], triple.get("expected_substring", ""))
+        msgs = format_messages(triple["dockerfile"])
         client = openai.OpenAI()
         resp = _openai_chat(
             client,
@@ -248,7 +248,7 @@ def _anthropic_messages(
 def baseline_sonnet_zero_shot(triple: dict[str, Any]) -> EvalEntry:
     t0 = time.perf_counter()
     try:
-        msgs = format_messages(triple["dockerfile"], triple["test_cmd"], triple.get("expected_substring", ""))
+        msgs = format_messages(triple["dockerfile"])
         # Anthropic API splits system from the message list.
         system = next((m["content"] for m in msgs if m["role"] == "system"), "")
         chat = [m for m in msgs if m["role"] != "system"]
@@ -617,7 +617,7 @@ def baseline_dockermin(triple: dict[str, Any], model_id: str = "vladtemian/docke
     """The fine-tuned dockermin LoRA adapter applied on top of base Qwen."""
     t0 = time.perf_counter()
     try:
-        msgs = format_messages(triple["dockerfile"], triple["test_cmd"], triple.get("expected_substring", ""))
+        msgs = format_messages(triple["dockerfile"])
         model, tok = _hf_dockermin(model_id)
         prompt = tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
         enc = tok(prompt, return_tensors="pt").to(model.device)

@@ -23,14 +23,14 @@ TARGET = 200
 MAX_WORKERS = 4
 
 
-def process(rec: dict) -> dict | None:
+def process(rec: dict, builder: str | None = None, cache_dir: str | None = None) -> dict | None:
     df = rec.get("dockerfile", "")
     if not df:
         return None
     cmd, expected = infer_test_cmd(df)
     if cmd is None or expected is None:
         return None
-    r = annotate_one(df, cmd, expected, build_timeout_s=300, test_timeout_s=30)
+    r = annotate_one(df, cmd, expected, build_timeout_s=300, test_timeout_s=30, builder=builder, cache_dir=cache_dir)
     if not r.ok:
         return None
     return {
@@ -77,6 +77,12 @@ def main() -> None:
     ap.add_argument(
         "--lockfile", default="logs/run_annotate.lock", help="exclusive flock path to prevent concurrent runs"
     )
+    ap.add_argument(
+        "--builder", default=None, help="buildx builder name (e.g. 'dockermin' on the pod); None uses the default"
+    )
+    ap.add_argument(
+        "--cache-dir", dest="cache_dir", default=None, help="buildx cache dir (e.g. /scratch/bkcache on the pod)"
+    )
     args = ap.parse_args()
 
     Path(args.lockfile).parent.mkdir(parents=True, exist_ok=True)
@@ -103,7 +109,7 @@ def main() -> None:
                 rec = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            futures.append(ex.submit(process, rec))
+            futures.append(ex.submit(process, rec, args.builder, args.cache_dir))
         for fut in as_completed(futures):
             res = fut.result()
             if res:

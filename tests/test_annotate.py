@@ -104,20 +104,54 @@ CMD ["python","-c","import flask,sys;print('ok',flask.__version__)"]
     assert result.baseline_build_s > 0
 
 
-def test_infer_test_cmd_python() -> None:
-    df = "FROM python:3.12-slim\nRUN pip install flask\n"
-    cmd, expected = infer_test_cmd(df)
+def test_infer_test_cmd_python_imports_real_package() -> None:
+    """The python probe must import a real installed package and print a marker.
+
+    Importing the package requires a python interpreter to exist in the image,
+    so a ``FROM scratch + RUN echo`` cheat (no interpreter) exits non-zero and
+    fails the gate.
+    """
+    cmd, expected = infer_test_cmd("FROM python:3.12-slim\nRUN pip install flask\n")
     assert cmd is not None
     assert expected is not None
     assert cmd[0] == "python"
-    assert "ok" in expected.lower()
+    assert "import" in " ".join(cmd)
+    assert "flask" in " ".join(cmd)
+    assert expected == "PYOK"
 
 
-def test_infer_test_cmd_node() -> None:
-    df = "FROM node:20-alpine\nRUN npm install express\n"
-    cmd, _expected = infer_test_cmd(df)
+def test_infer_test_cmd_python_falls_back_to_stdlib_when_package_unknown() -> None:
+    """When no installable package is named, fall back to importing a stdlib
+    module. This still requires a python interpreter, so a scratch image fails."""
+    cmd, expected = infer_test_cmd("FROM python:3.12-slim\nCOPY app.py /app.py\n")
+    assert cmd is not None
+    assert cmd[0] == "python"
+    assert "import" in " ".join(cmd)
+    assert expected == "PYOK"
+
+
+def test_infer_test_cmd_node_requires_module() -> None:
+    """The node probe must ``require`` a real module; a missing module exits
+    non-zero and fails the gate."""
+    cmd, expected = infer_test_cmd("FROM node:20\nRUN npm install express\n")
     assert cmd is not None
     assert cmd[0] == "node"
+    assert "require" in " ".join(cmd)
+    assert "express" in " ".join(cmd)
+    assert expected == "NODEOK"
+
+
+def test_infer_test_cmd_java_keeps_jre_probe() -> None:
+    cmd, expected = infer_test_cmd("FROM eclipse-temurin:21\nCOPY app.jar /app.jar\n")
+    assert cmd is not None
+    assert cmd[0] == "java"
+    assert expected == "openjdk"
+
+
+def test_infer_test_cmd_go_returns_none() -> None:
+    """Go: we cannot synthesize a safe runtime probe, so drop the triple."""
+    cmd, expected = infer_test_cmd("FROM golang:1.22\nRUN go build -o /server\n")
+    assert cmd is None and expected is None
 
 
 def test_infer_test_cmd_falls_back_to_none_on_unknown() -> None:

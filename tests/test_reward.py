@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from dockermin.dataset.annotate import BuildResult, ParseResult, TestResult
@@ -13,8 +15,30 @@ def test_dockermin_reward_garbage_completion_returns_negative() -> None:
     # No fence -> extract returns None -> parse_gate fails on "" -> score = -0.1
     completion = [{"role": "assistant", "content": "just prose"}]
     info = {"baseline_size": 100, "test_cmd": ["true"], "expected_substring": ""}
-    score = dockermin_reward(completion=completion, info=info)
+    score = asyncio.run(dockermin_reward(completion=completion, info=info))
     assert score == pytest.approx(-0.1)
+
+
+def test_reward_is_async_and_handles_malformed_info() -> None:
+    """Malformed info must yield a defined score, not raise (verifiers would
+    swallow a raise to 0.0, indistinguishable from a real build failure)."""
+    score = asyncio.run(
+        dockermin_reward(
+            completion=[{"role": "assistant", "content": "no fence here"}],
+            info={},  # missing baseline_size/test_cmd
+        )
+    )
+    assert score == 0.0
+
+
+def test_reward_garbage_completion_still_negative() -> None:
+    score = asyncio.run(
+        dockermin_reward(
+            completion=[{"role": "assistant", "content": "prose only"}],
+            info={"baseline_size": 100, "test_cmd": ["true"], "expected_substring": "x"},
+        )
+    )
+    assert score == pytest.approx(-0.1)  # parse gate fails on empty df
 
 
 def test_dockermin_reward_happy_path_clean_shrink(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -35,6 +59,6 @@ def test_dockermin_reward_happy_path_clean_shrink(monkeypatch: pytest.MonkeyPatc
         dr_mod, "run_test_gate", lambda tag, cmd, expected, timeout_s=30: TestResult(ok=True, output="ok")
     )
 
-    score = dockermin_reward(completion=completion, info=info)
+    score = asyncio.run(dockermin_reward(completion=completion, info=info))
     # 0.5 base + 0.5 * 0.2 reduction + 0 shape (no distroless/alpine/multi-stage cues)
     assert score == pytest.approx(0.6, abs=0.001)

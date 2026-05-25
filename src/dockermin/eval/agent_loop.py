@@ -71,7 +71,15 @@ def run_agent_loop(
             timeout=timeout_s,
             check=False,
         )
-        meta = json.loads(result.stdout) if result.returncode == 0 else {}
+        # claude -p --output-format json emits the result object even on a
+        # non-zero exit (e.g. budget cap tripped), so parse regardless of
+        # returncode - otherwise cost_usd/turns silently read 0 and the
+        # agent's true cost (the "RL is cheaper" comparison number) is
+        # under-reported.
+        try:
+            meta = json.loads(result.stdout) if result.stdout.strip() else {}
+        except json.JSONDecodeError:
+            meta = {}
         final_df = (workdir / "Dockerfile").read_text()
         return {
             "final_dockerfile": final_df,
