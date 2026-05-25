@@ -88,6 +88,49 @@ _ECOSYSTEM_MAP: dict[str, str] = {
 }
 
 
+# RUN-line installer signals -> ecosystem. Mirrors the breadth the annotate
+# probes recognise, so the scraper does not reject go/ruby/php/node candidates
+# that sit on a generic (debian/ubuntu/alpine) base just because the FROM line
+# is not itself a runtime image.
+_INSTALLER_SIGNALS: tuple[tuple[str, str], ...] = (
+    ("pip install", "python"),
+    ("pip3 install", "python"),
+    ("poetry install", "python"),
+    ("npm install", "node"),
+    ("npm ci", "node"),
+    ("yarn install", "node"),
+    ("gem install", "ruby"),
+    ("bundle install", "ruby"),
+    ("composer install", "php"),
+    ("composer require", "php"),
+    ("go build", "go"),
+    ("go install", "go"),
+    ("cargo build", "rust"),
+    ("cargo install", "rust"),
+)
+
+# Bases that are runtime images: their FROM line alone pins the ecosystem.
+# A generic OS base (debian/ubuntu/alpine/...) is NOT here, so we fall through
+# to the RUN-line installer signals for those.
+_RUNTIME_ECOSYSTEMS: frozenset[str] = frozenset(
+    {
+        "python",
+        "node",
+        "go",
+        "rust",
+        "ruby",
+        "java",
+        "php",
+        "perl",
+        "elixir",
+        "erlang",
+        "haskell",
+        "clojure",
+        "swift",
+    }
+)
+
+
 def _infer_ecosystem(name: str) -> str:
     """Map an image / repo name to a coarse ecosystem label, defaulting to 'unknown'."""
     if not name:
@@ -401,7 +444,7 @@ def _collect_search_items(query_variants: list[str], target: int) -> list[dict[s
     return items
 
 
-def _ecosystem_from_dockerfile(dockerfile_text: str) -> str:
+def _ecosystem_from_from_line(dockerfile_text: str) -> str:
     """Infer the ecosystem from the first FROM line of a Dockerfile."""
     for line in dockerfile_text.splitlines():
         ls = line.strip().lower()
@@ -413,6 +456,67 @@ def _ecosystem_from_dockerfile(dockerfile_text: str) -> str:
                 return _infer_ecosystem(base_name)
             return "unknown"
     return "unknown"
+
+
+def _ecosystem_from_run_lines(dockerfile_text: str) -> str:
+    """Infer the ecosystem from RUN-line installer signals (pip/npm/gem/...)."""
+    text = dockerfile_text.lower()
+    for signal, ecosystem in _INSTALLER_SIGNALS:
+        if signal in text:
+            return ecosystem
+    return "unknown"
+
+
+def _ecosystem_from_dockerfile(dockerfile_text: str) -> str:
+    """Resolve the ecosystem from the FROM runtime base, else RUN installer lines.
+
+    A known runtime base (python/node/golang/...) pins the ecosystem directly.
+    For a generic OS base (debian/ubuntu/alpine) or an unknown base, we fall
+    through to the RUN-line installer signals so a `debian + pip install`
+    candidate is recognised as python rather than rejected as unknown.
+    """
+    from_ecosystem = _ecosystem_from_from_line(dockerfile_text)
+    if from_ecosystem in _RUNTIME_ECOSYSTEMS:
+        return from_ecosystem
+    return _ecosystem_from_run_lines(dockerfile_text)
+
+
+def _instruction_keyword(line: str) -> str:
+    """Return the upper-cased Dockerfile instruction keyword of a line, or ''."""
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        return ""
+    return stripped.split(maxsplit=1)[0].upper()
+
+
+def _add_source_is_remote(line: str) -> bool:
+    """Return True if every source of an ADD instruction is a remote URL.
+
+    A remote ADD fetches over the network and needs no local build context;
+    a local ADD (e.g. `ADD app.tar /`) does and so is not self-contained.
+    """
+    tokens = line.strip().split()[1:]  # drop the ADD keyword
+    sources = [t for t in tokens if not t.startswith("--")][:-1]  # last token is the dest
+    if not sources:
+        return False
+    return all(src.startswith(("http://", "https://")) for src in sources)
+
+
+def _is_self_contained_probeable(dockerfile: str) -> bool:
+    """Return True if a Dockerfile can be built and probed with no local context.
+
+    Rejects bodies that need files from the build context (a `COPY` instruction
+    or a local, non-URL `ADD`) and bodies whose ecosystem does not resolve to a
+    known runtime - those are the candidates the empty-context build gate and the
+    runtime probe would drop anyway.
+    """
+    for line in dockerfile.splitlines():
+        keyword = _instruction_keyword(line)
+        if keyword == "COPY":
+            return False
+        if keyword == "ADD" and not _add_source_is_remote(line):
+            return False
+    return _ecosystem_from_dockerfile(dockerfile) != "unknown"
 
 
 def _code_hit_download_url(full_name: str, path: str) -> str | None:
@@ -458,27 +562,34 @@ def _candidate_from_code_hit(item: dict[str, Any], seen_hashes: set[str]) -> Can
     )
 
 
-def fetch_github_search(limit: int = 100) -> Iterable[Candidate]:
-    """Search GitHub code for small Dockerfiles. Dedupe by content hash.
+# Per-ecosystem install-pattern queries. GitHub code-search legacy syntax has
+# no NOT/OR, so we use positive installer terms server-side and reject COPY /
+# unknown-ecosystem hits client-side via _is_self_contained_probeable. Targeting
+# the install pattern (not raw file size) is what surfaces self-contained,
+# probeable Dockerfiles instead of repo-coupled ones.
+_INSTALL_PATTERN_QUERIES: tuple[str, ...] = (
+    "pip language:Dockerfile filename:Dockerfile size:<2500",
+    "npm language:Dockerfile filename:Dockerfile size:<2500",
+    "gem language:Dockerfile filename:Dockerfile size:<2500",
+    "composer language:Dockerfile filename:Dockerfile size:<2500",
+    '"go build" language:Dockerfile filename:Dockerfile size:<2500',
+)
 
-    Note: code search does NOT accept the `stars:` qualifier (that is for repo
-    search). Using language:Dockerfile + size:<5000 for volume; quality
-    filtering happens at annotation time via parse+build+test gates.
+
+def fetch_github_search(limit: int = 100) -> Iterable[Candidate]:
+    """Search GitHub code for self-contained, probeable Dockerfiles by install pattern.
+
+    Queries target per-ecosystem installer terms (pip/npm/gem/composer/go build)
+    rather than raw file size, then every fetched candidate is gated through
+    `_is_self_contained_probeable` - the client-side filter rejects COPY/local-ADD
+    and unknown-ecosystem hits that the server-side legacy syntax cannot exclude.
 
     Pages through search/code 100 items at a time (GitHub caps total search
-    results at 1000 across all pages).
+    results at 1000 across all pages). Dedupe by content hash.
     """
     seen_hashes: set[str] = set()
 
-    # Multiple query variants to widen the result pool beyond the 1000-item
-    # per-query cap. Each variant is paged up to GitHub's 10-page limit.
-    query_variants = [
-        "filename:Dockerfile language:Dockerfile size:<5000",
-        "filename:Dockerfile language:Dockerfile size:<3000",
-        "filename:Dockerfile language:Dockerfile size:<8000 size:>5000",
-    ]
-
-    items = _collect_search_items(query_variants, target=limit * 3)
+    items = _collect_search_items(list(_INSTALL_PATTERN_QUERIES), target=limit * 3)
 
     yielded = 0
     for item in items:
@@ -486,6 +597,8 @@ def fetch_github_search(limit: int = 100) -> Iterable[Candidate]:
             return
         candidate = _candidate_from_code_hit(item, seen_hashes)
         if candidate is None:
+            continue
+        if not _is_self_contained_probeable(candidate.dockerfile):
             continue
         yield candidate
         yielded += 1
