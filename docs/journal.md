@@ -2,6 +2,24 @@
 
 Append per session. Last entry at top. 3-5 sentences per entry. What worked, what broke, what was not obvious.
 
+## 2026-05-25 (Vlad + Bot) - quality gates adopted, matching sisif bar
+
+Audited dockermin against sisif's quality system (4 subagents analyzed sisif's ruff/mypy config, enforcement, conventions, structure), wrote a 5-phase plan (`docs/plans/2026-05-25-quality-gates.md`), then implemented it with parallel subagents in two waves.
+
+Before/after:
+- ruff: **158 violations -> 0** (full sisif ruleset: ANN, T20, TRY, BLE, EM, C90, PLR, PERF, RET, TCH, ...). Went stricter than sisif: enabled EM rules and explicit max-args=6 that sisif waived "for Django", dropped sisif's gradual-debt security waivers.
+- mypy: strict, **0 errors** (was never run before). Closed sisif's own hole - mypy now runs in CI, not just locally.
+- tests: **35 -> 98**, coverage **20% -> 48%** with a 45% CI floor (ratchets up).
+- New guardrails: CLAUDE.md (no-nesting/names-are-contracts/fail-fast/no-narration/plain-functions), ARCHITECTURE.md, `.github/workflows/quality.yml` (ruff+format+mypy+pytest+coverage, blocking on push/PR), pre-commit (ruff+ruff-format+local-mypy).
+
+What was not obvious:
+- The `from __future__ import annotations` question: it's only load-bearing on 3.11 for TCH-guarded imports; PEP 649 in Python 3.14 would make it unnecessary, but our torch/vllm pins cap us at 3.11. Resolved by enforcing it everywhere via ruff isort required-imports (deliberate policy, not cargo-cult).
+- pre-commit's mirrors-mypy runs in an isolated env without our deps -> false import-not-found errors. Fixed with a `local` mypy hook using `.venv/bin/mypy`, matching how CI runs it.
+- The bulk lint/type cleanup (158->~3 ruff) was done by ad-hoc fix-agents BEFORE the plan existed; Vlad correctly redirected to analyze->plan->implement. The cleanup was kept as plan input rather than redone.
+- Phase 5 (naming-contract audit) was a no-op: the code already obeyed fetch/find/get contracts with zero generic Manager/Helper names.
+
+CI green at commit ba043f0. ~62 dataset triples + 82 variants from the prior session still stand; this session was pure quality-hardening, no behavior change (reward math byte-identical, verified by exact-value tests).
+
 ## 2026-05-23 Saturday very-early hours (round 3 - more variants + lockfile rollout + ship templates)
 
 Continued with another wave of agents. Concrete results:
