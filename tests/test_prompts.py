@@ -34,7 +34,17 @@ def test_extract_dockerfile_returns_none_on_no_fence() -> None:
     assert extract_dockerfile("just prose, no code") is None
 
 
-def test_format_messages_includes_dockerfile_and_test_cmd() -> None:
-    msgs = format_messages("FROM python\n", ["python", "-c", "print('ok')"], "ok")
+def test_format_messages_includes_dockerfile() -> None:
+    msgs = format_messages("FROM python\n")
     assert any(m["role"] == "system" for m in msgs)
-    assert any("python" in m["content"] for m in msgs)
+    assert any("FROM python" in m["content"] for m in msgs)
+
+
+def test_prompt_does_not_leak_expected_substring() -> None:
+    """The model must NOT see the test_cmd or expected output - that is the
+    reward-hack vector (FROM scratch + RUN echo <expected>)."""
+    msgs = format_messages("FROM python:3.12\nRUN pip install flask\n")
+    blob = " ".join(m["content"] for m in msgs)
+    assert "expected" not in blob.lower()
+    assert "test_cmd" not in blob.lower()
+    assert "ok 3.0.0" not in blob  # a sample expected value must never appear

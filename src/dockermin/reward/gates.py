@@ -31,6 +31,12 @@ def _shape_bonus(text: str) -> float:
     return bonus
 
 
+# An image this small relative to its baseline with no multi-stage artifact is
+# almost certainly empty (the FROM scratch + RUN echo cheat), not an honest shrink.
+_TINY_IMAGE_FRACTION = 0.02
+_TINY_IMAGE_PENALTY = -0.25
+
+
 def _shape_penalty(text: str) -> float:
     """Negative shaping for unpinned tags and empty `FROM scratch`.
 
@@ -47,6 +53,22 @@ def _shape_penalty(text: str) -> float:
     if "from scratch" in text and not re.search(r"\bcopy\b", text):
         penalty -= 0.10
     return penalty
+
+
+def _tiny_image_penalty(text: str, baseline_size: int, new_size: int) -> float:
+    """Soft anti-cheat: an image <2% of baseline with no `copy --from` artifact
+    is most likely an empty shell (the FROM scratch + RUN echo cheat).
+
+    Legit static binaries pulled from a builder stage (`COPY --from=`) are
+    exempt - they can honestly be tiny.
+    """
+    if baseline_size <= 0:
+        return 0.0
+    if new_size >= baseline_size * _TINY_IMAGE_FRACTION:
+        return 0.0
+    if re.search(r"copy\s+--from=", text):
+        return 0.0
+    return _TINY_IMAGE_PENALTY
 
 
 def compute_score(  # noqa: PLR0913 — every gate outcome + size measurement feeds the reward; collapsing them would hide the scoring inputs
@@ -74,5 +96,5 @@ def compute_score(  # noqa: PLR0913 — every gate outcome + size measurement fe
     reduction = max(0.0, (baseline_size - new_size) / max(1, baseline_size))
     dense = min(1.0, reduction)
     text = dockerfile_text.lower()
-    shape = _shape_bonus(text) + _shape_penalty(text)
+    shape = _shape_bonus(text) + _shape_penalty(text) + _tiny_image_penalty(text, baseline_size, new_size)
     return min(1.0, 0.5 + 0.5 * dense + shape)

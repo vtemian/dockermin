@@ -109,6 +109,54 @@ def test_from_scratch_with_leading_copy_no_penalty() -> None:
     assert s_with_copy - s_no_copy == pytest.approx(0.10, abs=0.001)
 
 
+def test_from_scratch_echo_cheat_scores_low() -> None:
+    """FROM scratch + RUN echo (the classic cheat) must not out-score an
+    honest shrink, even if it somehow passed the test gate."""
+    cheat = compute_score(
+        parse_ok=True,
+        build_ok=True,
+        test_ok=True,
+        command_count=2,
+        baseline_size=100,
+        new_size=1,
+        dockerfile_text="FROM scratch\nRUN echo ok",
+    )
+    honest = compute_score(
+        parse_ok=True,
+        build_ok=True,
+        test_ok=True,
+        command_count=4,
+        baseline_size=100,
+        new_size=80,
+        dockerfile_text='FROM python:3.12-slim\nRUN pip install --no-cache-dir flask\nCMD ["python","-m","flask"]',
+    )
+    assert cheat < honest
+
+
+def test_suspiciously_tiny_image_soft_penalised() -> None:
+    """An image <2% of baseline with no multi-stage COPY is likely empty -
+    soft penalty, not a hard reject (legit static distroless binaries exist)."""
+    s = compute_score(
+        parse_ok=True,
+        build_ok=True,
+        test_ok=True,
+        command_count=2,
+        baseline_size=100,
+        new_size=1,
+        dockerfile_text="FROM scratch\nRUN echo ok",
+    )
+    s_legit = compute_score(
+        parse_ok=True,
+        build_ok=True,
+        test_ok=True,
+        command_count=3,
+        baseline_size=100,
+        new_size=1,
+        dockerfile_text='FROM scratch\nCOPY --from=build /app /app\nENTRYPOINT ["/app"]',
+    )
+    assert s < s_legit
+
+
 def test_latest_tag_penalty_applied_when_test_passes() -> None:
     s_with = compute_score(
         parse_ok=True,

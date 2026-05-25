@@ -7,6 +7,7 @@ end-to-end smoke test before paying for GPU rollouts.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -27,7 +28,7 @@ def main() -> None:
     client = Anthropic()
 
     for t in triples:
-        msgs = format_messages(t["dockerfile"], t["test_cmd"], t["expected_substring"])
+        msgs = format_messages(t["dockerfile"])
         response = client.messages.create(
             model=MODEL,
             max_tokens=MAX_TOKENS,
@@ -36,13 +37,15 @@ def main() -> None:
         )
         completion_text = response.content[0].text
         completion = [{"role": "assistant", "content": completion_text}]
-        score = dockermin_reward(
-            completion=completion,
-            info={
-                "baseline_size": t["baseline_size"],
-                "test_cmd": t["test_cmd"],
-                "expected_substring": t["expected_substring"],
-            },
+        score = asyncio.run(
+            dockermin_reward(
+                completion=completion,
+                info={
+                    "baseline_size": t["baseline_size"],
+                    "test_cmd": t["test_cmd"],
+                    "expected_substring": t["expected_substring"],
+                },
+            )
         )
         baseline_mb = t["baseline_size"] / 1e6
         tag = str(t.get("id", ""))[-30:]

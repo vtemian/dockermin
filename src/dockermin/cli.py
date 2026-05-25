@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import shlex
 import sys
 from pathlib import Path
 
@@ -42,7 +41,7 @@ def main() -> int:
     p.add_argument("--model", default="vladtemian/dockermin-qwen7b-lora-v1")
     args = p.parse_args()
     df = args.dockerfile.read_text()
-    msgs = format_messages(df, shlex.split(args.test), args.expect)
+    msgs = format_messages(df)
     text = _generate(msgs, args.model)
     new_df = extract_dockerfile(text)
     if new_df is None:
