@@ -2,6 +2,33 @@
 
 Append per session. Last entry at top. 3-5 sentences per entry. What worked, what broke, what was not obvious.
 
+## 2026-05-25 - dataset growth COMPLETE (Phase 4 done)
+
+The dataset-growth plan landed. Final set: **145 rows = 28 bases + 117 variants**
+(up from 93 = 11 bases + 82 variants). Variant pass rate ~86% (145 kept, 23 failed).
+
+Yield story (the convergent finding from 3 context agents): the old pipeline dropped
+62% of candidates as "unknown ecosystem" and the scraper optimized file-size instead of
+the install pattern. Fixes that moved the needle:
+- 3 probe-extraction bugs fixed (pip quote-strip, npm cross-line/global) recovered the
+  existing bases under the hardened import-probes.
+- Broadened `infer_test_cmd` to go/ruby/php/rust + RUN-line ecosystem resolution.
+- Retargeted `fetch_github_search` at install-pattern queries (pip/npm/gem/composer/go
+  build) + client-side reject of COPY/unknown. 226 candidates, 77 self-contained-probeable
+  (vs ~27 before).
+
+**Honest diversity limit (matters for the writeup):** the new candidates are
+python-heavy. Final ecosystem mix across all rows: 54 python, 19 node, 4 alpine, 3 ruby,
+65 unknown (mostly the old eclipse-temurin/java bases mislabelled by the pre-fix
+inference). So the model will learn python/node Dockerfile optimization well and
+generalize weakly to other ecosystems. 28 distinct bases is 2.5x the old 11 but still
+small - a pilot run is a methodology test, not a generalization claim. The honest path to
+broad generalization is more bases (Phase 5 synthetic-build-context, deferred) or more
+scraping, not more variants of the same 28.
+
+Phase 5 (synthetic app-file in the build context) was NOT triggered: 28 bases is close
+enough to the 30 target that building that machinery for ~2 bases wasn't worth it (YAGNI).
+
 ## 2026-05-25 - RESUME-AFTER-RESTART checkpoint (dataset growth mid-flight)
 
 Vlad is doing a machine restart. State captured so we lose nothing (data/ is
