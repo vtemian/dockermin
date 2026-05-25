@@ -29,6 +29,8 @@ cat > /etc/tinyproxy/filter <<'EOF'
 ^https?://github\.com
 ^https?://codeload\.github\.com
 ^https?://objects\.githubusercontent\.com
+^https?://(.*\.)?huggingface\.co
+^https?://cdn-lfs.*\.huggingface\.co
 EOF
 
 systemctl restart tinyproxy
