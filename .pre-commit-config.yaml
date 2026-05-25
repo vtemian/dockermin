@@ -9,10 +9,16 @@ repos:
       - id: ruff
         args: [--fix]
       - id: ruff-format
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.13.0
+  # Local mypy hook runs in the project venv so it sees installed deps
+  # (pytest, tenacity, the ML libs). mirrors-mypy uses an isolated env that
+  # can't resolve them, producing false import-not-found errors. This matches
+  # how CI runs mypy (real install, then `mypy src tests`).
+  - repo: local
     hooks:
       - id: mypy
-        additional_dependencies: []
-        args: [--config-file=pyproject.toml]
-        files: ^(src|tests)/
+        name: mypy (strict, project venv)
+        entry: .venv/bin/mypy
+        language: system
+        args: [--config-file=pyproject.toml, src, tests]
+        pass_filenames: false
+        types: [python]
