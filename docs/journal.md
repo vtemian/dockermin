@@ -2,6 +2,17 @@
 
 Append per session. Last entry at top. 3-5 sentences per entry. What worked, what broke, what was not obvious.
 
+## 2026-05-26 - HF namespace fix (vladtemian -> vtemian) + dataset PUSHED
+
+The whole project referenced `vladtemian/` HF slugs, but Vlad's actual HF account is
+`vtemian` (no orgs) — `vladtemian` never existed, so the dataset was never pushable and the
+env adapter's load_dataset would 404 at pilot start. Vlad chose to standardize on his real
+account. Renamed all `vladtemian/` slugs -> `vtemian/` repo-wide (dataset + adapter), left
+the email vladtemian@gmail.com and one historical plan wandb-entity untouched. Pushed the
+145-row dataset to vtemian/dockermin-v0 (public): 108 train + 37 test, grouped by base_id so
+no variant leaks across the split. Verified it loads with the right columns/types
+(test_cmd=list, baseline_size=int). First pilot blocker cleared, no pod needed.
+
 ## 2026-05-26 - Phase 3 prep (no-pod): configs rewritten, reward validated locally
 
 Rewrote configs/dockermin_pilot.toml + dockermin_full.toml to the REAL prime-rl schema
@@ -24,7 +35,7 @@ honest alpine shrink +0.976, non-dockerfile -0.100, test-fail +0.050, build-fail
 So parse_gate + build_gate (docker buildx) + run_test_gate (docker run) + compute_score are
 validated end-to-end on real Docker. make quality green (137 passed).
 
-NEXT (needs pod + Vlad's credits): confirm vladtemian/dockermin-v0 is actually pushed to HF
+NEXT (needs pod + Vlad's credits): confirm vtemian/dockermin-v0 is actually pushed to HF
 (the env loads it; couldn't verify locally without an HF token) — that's the first pilot
 blocker. Then DooD + egress proxy setup, then `--dry-run` the pilot config, then 50-step pilot.
 
@@ -121,7 +132,7 @@ PYTHONPATH=src .venv/bin/python scripts/synthetic_variants.py \
 2. Commit journal + note on the branch -> open PR -> merge to main (CI must pass).
 3. `make quality` should stay green.
 
-**Still BLOCKED on Vlad (unchanged):** HF_TOKEN (push `vladtemian/dockermin-v0` with the
+**Still BLOCKED on Vlad (unchanged):** HF_TOKEN (push `vtemian/dockermin-v0` with the
 train/test split) and Prime Intellect account + GPU budget (the entire pod-side: smoke
 tests -> pilot -> full run -> eval -> ship). The core thesis (7B GRPO LoRA vs Sonnet
 agent-loop) is still 100% untested - it needs the pod run.

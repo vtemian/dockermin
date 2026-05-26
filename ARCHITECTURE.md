@@ -15,7 +15,7 @@
 | Dataset sources | docker-library/official-images, docker/awesome-compose, GitHub code search (via `gh` CLI) |
 | Synthetic variants / agent baseline | `claude -p` (Claude Code headless, Sonnet 4.6) |
 | Eval baselines | OpenAI SDK (GPT-4o), Anthropic SDK (Sonnet), hadolint, SlimToolkit |
-| Data store | JSONL on disk -> Hugging Face Hub (`vladtemian/dockermin-v0`) |
+| Data store | JSONL on disk -> Hugging Face Hub (`vtemian/dockermin-v0`) |
 | Lang / gates | Python 3.11, ruff + mypy-strict, pytest |
 
 ## Directory Structure
@@ -39,8 +39,8 @@ scripts/                        # CLI entrypoints / pod ops glue (not library; T
 ├── run_scrape.py               # Run all scrapers -> data/raw/candidates.jsonl (CPU-only)
 ├── run_annotate.py             # Bulk-annotate candidates -> curated/triples.jsonl; per-run file then atomic merge; --lockfile
 ├── synthetic_variants.py       # Claude-generated bloated variants per base; append-mode + dedup + --lockfile
-├── push_to_hf.py               # Push curated triples.jsonl to HF as vladtemian/dockermin-v0
-├── push_adapter.py             # Push best LoRA checkpoint to HF as vladtemian/dockermin-qwen7b-lora-v1
+├── push_to_hf.py               # Push curated triples.jsonl to HF as vtemian/dockermin-v0
+├── push_adapter.py             # Push best LoRA checkpoint to HF as vtemian/dockermin-qwen7b-lora-v1
 ├── run_eval.py                 # Run a set of baselines over the holdout -> EvalEntry JSONL
 ├── leaderboard.py              # Aggregate eval JSONL -> markdown leaderboard (pass rate, mean reduction)
 ├── audit_rollouts.py           # Pull random rollouts from a checkpoint to eyeball reward-hacking
@@ -130,7 +130,7 @@ docs/                           # Project docs + research + journal
    not truncate. --lockfile for exclusive run.
 
 4. push_to_hf.py uploads the curated triples.jsonl as the HF dataset
-   vladtemian/dockermin-v0.
+   vtemian/dockermin-v0.
 ```
 
 ### 2. Reward + eval (prime-rl reward; offline baseline leaderboard)
@@ -140,7 +140,7 @@ TRAINING REWARD (prime-rl GRPO):
 1. prime-rl loads the verifiers env via configs/dockermin_*.toml ([[env]] id="dockermin-env").
    verifiers resolves "dockermin-env" -> module "dockermin_env" and calls
    dockermin_env.load_environment():
-     load_dataset("vladtemian/dockermin-v0") -> map each row to {prompt, info, answer}
+     load_dataset("vtemian/dockermin-v0") -> map each row to {prompt, info, answer}
         prompt = [SYSTEM_PROMPT, USER_TEMPLATE.format(dockerfile/test_cmd/expected)]
         info   = {baseline_size, test_cmd, expected_substring}
      -> vf.SingleTurnEnv(dataset, rubric=vf.Rubric(funcs=[dockermin_reward], weights=[1.0]))

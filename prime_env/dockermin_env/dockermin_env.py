@@ -10,8 +10,8 @@ from dockermin.reward.prompts import SYSTEM_PROMPT, USER_TEMPLATE
 
 
 def load_environment(**_kwargs) -> vf.Environment:
-    train_ds = load_dataset("vladtemian/dockermin-v0", split="train")
-    eval_ds = load_dataset("vladtemian/dockermin-v0", split="test")
+    train_ds = load_dataset("vtemian/dockermin-v0", split="train")
+    eval_ds = load_dataset("vtemian/dockermin-v0", split="test")
 
     def fmt(ex):
         return {

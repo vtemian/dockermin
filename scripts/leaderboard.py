@@ -8,7 +8,7 @@ For each baseline, computes:
 We expect the input JSONL to carry rows of the EvalEntry shape, plus a sibling
 holdout (the dockermin-v0 dataset) so we can recover ``baseline_size`` and
 compute the reduction. The holdout id used at eval time should be passed via
-``--holdout`` (default: ``vladtemian/dockermin-v0``).
+``--holdout`` (default: ``vtemian/dockermin-v0``).
 """
 
 from __future__ import annotations
@@ -130,7 +130,7 @@ def main() -> int:
         default=Path("docs/leaderboard.md"),
         help="Output markdown path. Default: docs/leaderboard.md",
     )
-    p.add_argument("--holdout", default="vladtemian/dockermin-v0", help="HF dataset id for baseline_size lookup.")
+    p.add_argument("--holdout", default="vtemian/dockermin-v0", help="HF dataset id for baseline_size lookup.")
     args = p.parse_args()
 
     rows = [json.loads(line) for line in args.in_path.read_text().splitlines() if line.strip()]

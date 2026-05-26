@@ -4,7 +4,7 @@ Verifiers Environment package wrapping the Dockermin dataset + reward for prime-
 
 This package exposes a single-turn environment named `dockermin` that prime-rl can
 discover via the `verifiers.environments` entry-point group. It loads the
-`vladtemian/dockermin-v0` HuggingFace dataset, formats each row with the
+`vtemian/dockermin-v0` HuggingFace dataset, formats each row with the
 Dockermin prompt template, and grades rollouts with `dockermin.reward.dockermin_reward`.
 
 ## Layout
@@ -43,5 +43,5 @@ id = "dockermin"
 ## Dependencies
 
 - `verifiers` - provides `SingleTurnEnv`, `Rubric`, `Environment` base classes
-- `datasets` - loads `vladtemian/dockermin-v0` from HF Hub
+- `datasets` - loads `vtemian/dockermin-v0` from HF Hub
 - `dockermin` - the parent package (prompts + reward), install from repo root with `pip install -e ../..`

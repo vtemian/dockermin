@@ -1,4 +1,4 @@
-"""Push the variant triple set to HF Hub as vladtemian/dockermin-v0.
+"""Push the variant triple set to HF Hub as vtemian/dockermin-v0.
 
 Pushes a grouped train/test split: variants share a ``base_id`` with their
 base, so the split groups by base to keep all variants of a base on one
@@ -18,7 +18,7 @@ from datasets import Dataset, DatasetDict
 from dockermin.dataset.split import grouped_train_test_split
 
 IN = Path("data/curated/triples_with_variants.jsonl")
-REPO_ID = "vladtemian/dockermin-v0"
+REPO_ID = "vtemian/dockermin-v0"
 TEST_FRAC = 0.3
 SPLIT_SEED = 0
 

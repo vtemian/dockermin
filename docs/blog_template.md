@@ -4,8 +4,8 @@
 > Date: 2026-06-XX
 > Compute: ~$XXX on Prime Intellect
 > Code: github.com/vtemian/dockermin
-> Adapter: huggingface.co/vladtemian/dockermin-qwen7b-lora-v1
-> Dataset: huggingface.co/datasets/vladtemian/dockermin-v0
+> Adapter: huggingface.co/vtemian/dockermin-qwen7b-lora-v1
+> Dataset: huggingface.co/datasets/vtemian/dockermin-v0
 
 ## TL;DR
 

@@ -38,7 +38,7 @@ def main() -> int:
     p.add_argument("dockerfile", type=Path)
     p.add_argument("--test", required=True)
     p.add_argument("--expect", required=True)
-    p.add_argument("--model", default="vladtemian/dockermin-qwen7b-lora-v1")
+    p.add_argument("--model", default="vtemian/dockermin-qwen7b-lora-v1")
     args = p.parse_args()
     df = args.dockerfile.read_text()
     msgs = format_messages(df)

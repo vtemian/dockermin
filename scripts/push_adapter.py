@@ -1,4 +1,4 @@
-"""Push best LoRA checkpoint to HF as vladtemian/dockermin-qwen7b-lora-v1."""
+"""Push best LoRA checkpoint to HF as vtemian/dockermin-qwen7b-lora-v1."""
 
 from __future__ import annotations
 
@@ -9,10 +9,10 @@ from huggingface_hub import HfApi
 
 def main(ckpt_dir: str) -> None:
     api = HfApi()
-    api.create_repo("vladtemian/dockermin-qwen7b-lora-v1", repo_type="model", exist_ok=True)
+    api.create_repo("vtemian/dockermin-qwen7b-lora-v1", repo_type="model", exist_ok=True)
     api.upload_folder(
         folder_path=ckpt_dir,
-        repo_id="vladtemian/dockermin-qwen7b-lora-v1",
+        repo_id="vtemian/dockermin-qwen7b-lora-v1",
         repo_type="model",
         commit_message="initial LoRA checkpoint",
     )

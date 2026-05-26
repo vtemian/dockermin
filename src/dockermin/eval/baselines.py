@@ -613,7 +613,7 @@ def _hf_dockermin(model_id: str) -> tuple[Any, Any]:
     return model, tok
 
 
-def baseline_dockermin(triple: dict[str, Any], model_id: str = "vladtemian/dockermin-qwen7b-lora-v1") -> EvalEntry:
+def baseline_dockermin(triple: dict[str, Any], model_id: str = "vtemian/dockermin-qwen7b-lora-v1") -> EvalEntry:
     """The fine-tuned dockermin LoRA adapter applied on top of base Qwen."""
     t0 = time.perf_counter()
     try:

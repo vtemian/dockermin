@@ -69,7 +69,7 @@ If you finish Phase 4 by lunch with all checkpoints green, you have a green ligh
 
 - Bulk-annotate the 235 candidates already in `data/raw/candidates.jsonl` (regenerate on pod if needed). Expect ~30-50 working triples from official-images Dockerfiles that don't need build context.
 - Run `scripts/synthetic_variants.py` to generate 5 unoptimized variants per working base via Sonnet 4.6 (~$2 API). Yields 100-250 triples total.
-- Push to HF as `vladtemian/dockermin-v0`.
+- Push to HF as `vtemian/dockermin-v0`.
 - 50-step pilot GRPO run on the curated set, watch wandb.
 
 ## What we already verified Friday night (locally)

@@ -4,7 +4,7 @@
 > Date: 2026-06-XX
 > Compute spent: ~$XXX
 > Code: github.com/vtemian/dockermin
-> Dataset: huggingface.co/datasets/vladtemian/dockermin-v0 (DOES ship)
+> Dataset: huggingface.co/datasets/vtemian/dockermin-v0 (DOES ship)
 
 ## The honest claim
 
@@ -12,7 +12,7 @@ A GRPO-fine-tuned Qwen 2.5 Coder 7B LoRA did NOT meaningfully beat a Claude Sonn
 
 ## What we shipped instead
 
-- Dataset (`vladtemian/dockermin-v0`): 16 real Dockerfiles + 48 synthetic variants with functional test triples (parse + build + test verified).
+- Dataset (`vtemian/dockermin-v0`): 16 real Dockerfiles + 48 synthetic variants with functional test triples (parse + build + test verified).
 - Benchmark suite: 7 baselines including agent loop, all with reproducible run scripts.
 - Leaderboard: see docs/leaderboard.md.
 - Recipe for the failure: see below.

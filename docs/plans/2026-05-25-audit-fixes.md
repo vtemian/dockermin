@@ -320,7 +320,7 @@ git commit -m "feat(dataset): grouped-by-base train/test split so holdout doesn'
 - Modify: `prime_env/dockermin_env/dockermin_env.py`
 - Modify: `scripts/run_eval.py`
 
-**Step 1:** `dockermin_env.load_environment` -> `load_dataset("vladtemian/dockermin-v0", split="train")` explicitly. Optionally pass `eval_dataset=load_dataset(..., split="test")` to `SingleTurnEnv` so checkpoint evals use the holdout.
+**Step 1:** `dockermin_env.load_environment` -> `load_dataset("vtemian/dockermin-v0", split="train")` explicitly. Optionally pass `eval_dataset=load_dataset(..., split="test")` to `SingleTurnEnv` so checkpoint evals use the holdout.
 
 **Step 2:** `run_eval._load_holdout` -> load `split="test"` and REMOVE the "last 150 train rows" fallback; if no test split exists, raise a clear error (don't silently eval on training data).
 

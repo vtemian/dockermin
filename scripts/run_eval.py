@@ -5,7 +5,7 @@ Usage:
         --baselines qwen_zs gpt4o sonnet_zs hadolint slim manual agent_loop dockermin \
         --out data/eval/results.jsonl
 
-The holdout is the ``test`` split of ``vladtemian/dockermin-v0``. If the
+The holdout is the ``test`` split of ``vtemian/dockermin-v0``. If the
 dataset has no ``test`` split we fail loudly rather than silently evaluating
 on training data.
 """
@@ -69,12 +69,12 @@ def main() -> int:
     )
     p.add_argument(
         "--holdout",
-        default="vladtemian/dockermin-v0",
-        help="HF dataset id. Default: vladtemian/dockermin-v0",
+        default="vtemian/dockermin-v0",
+        help="HF dataset id. Default: vtemian/dockermin-v0",
     )
     p.add_argument(
         "--dockermin-model",
-        default="vladtemian/dockermin-qwen7b-lora-v1",
+        default="vtemian/dockermin-qwen7b-lora-v1",
         help="HF model id for the dockermin LoRA baseline.",
     )
     p.add_argument(

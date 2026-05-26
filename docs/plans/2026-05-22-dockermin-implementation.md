@@ -933,7 +933,7 @@ git push
 
 **Step 1: Implementation**
 ```python
-"""Push curated/triples.jsonl to HF Hub as vladtemian/dockermin-v0."""
+"""Push curated/triples.jsonl to HF Hub as vtemian/dockermin-v0."""
 from __future__ import annotations
 import json
 from pathlib import Path
@@ -945,7 +945,7 @@ def main() -> None:
     records = [json.loads(line) for line in IN.read_text().splitlines() if line.strip()]
     ds = Dataset.from_list(records)
     ds.push_to_hub(
-        "vladtemian/dockermin-v0",
+        "vtemian/dockermin-v0",
         private=False,
         commit_message=f"v0: {len(records)} curated Dockerfile triples (parse+build+test verified)",
     )
@@ -971,12 +971,12 @@ for r in random.sample(recs, min(20, len(recs))):
 ```bash
 .venv/bin/python scripts/push_to_hf.py
 ```
-Check at https://huggingface.co/datasets/vladtemian/dockermin-v0.
+Check at https://huggingface.co/datasets/vtemian/dockermin-v0.
 
 **Step 4: Commit**
 ```bash
 git add scripts/push_to_hf.py
-git commit -m "dataset: push v0 to HF as vladtemian/dockermin-v0"
+git commit -m "dataset: push v0 to HF as vtemian/dockermin-v0"
 git push
 ```
 
@@ -1333,7 +1333,7 @@ from dockermin.reward.prompts import SYSTEM_PROMPT, USER_TEMPLATE
 from dockermin.reward.dockermin_reward import dockermin_reward
 
 def load_environment(**kwargs) -> vf.Environment:
-    ds = load_dataset("vladtemian/dockermin-v0", split="train")
+    ds = load_dataset("vtemian/dockermin-v0", split="train")
     def fmt(ex):
         return {
             "prompt": [
@@ -1676,15 +1676,15 @@ git push
 
 **Step 1: Implementation**
 ```python
-"""Push best LoRA checkpoint to HF as vladtemian/dockermin-qwen7b-lora-v1."""
+"""Push best LoRA checkpoint to HF as vtemian/dockermin-qwen7b-lora-v1."""
 from __future__ import annotations
 import sys
 from huggingface_hub import HfApi
 
 def main(ckpt_dir: str) -> None:
     api = HfApi()
-    api.create_repo("vladtemian/dockermin-qwen7b-lora-v1", repo_type="model", exist_ok=True)
-    api.upload_folder(folder_path=ckpt_dir, repo_id="vladtemian/dockermin-qwen7b-lora-v1",
+    api.create_repo("vtemian/dockermin-qwen7b-lora-v1", repo_type="model", exist_ok=True)
+    api.upload_folder(folder_path=ckpt_dir, repo_id="vtemian/dockermin-qwen7b-lora-v1",
                       repo_type="model", commit_message="initial LoRA checkpoint")
 
 if __name__ == "__main__":
@@ -1864,7 +1864,7 @@ def main() -> int:
     p.add_argument("dockerfile", type=Path)
     p.add_argument("--test", required=True)
     p.add_argument("--expect", required=True)
-    p.add_argument("--model", default="vladtemian/dockermin-qwen7b-lora-v1")
+    p.add_argument("--model", default="vtemian/dockermin-qwen7b-lora-v1")
     args = p.parse_args()
     df = args.dockerfile.read_text()
     msgs = format_messages(df, args.test.split(), args.expect)
@@ -1927,8 +1927,8 @@ Optional. Status-shaped but legitimate for a learning artifact ship.
 
 # What ships at end of weekend 3
 
-- HF adapter: `vladtemian/dockermin-qwen7b-lora-v1`
-- HF dataset: `vladtemian/dockermin-v0`
+- HF adapter: `vtemian/dockermin-qwen7b-lora-v1`
+- HF dataset: `vtemian/dockermin-v0`
 - GitHub repo: `github.com/vtemian/dockermin` (already created)
 - Benchmark suite + leaderboard (`docs/leaderboard.md`)
 - `dockermin` CLI (`pip install` from repo)

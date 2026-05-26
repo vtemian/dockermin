@@ -18,8 +18,8 @@ A reinforcement-learning fine-tune of Qwen 2.5 Coder 7B Instruct using GRPO (Gro
 
 ## Planned deliverables
 
-- HF adapter: `vladtemian/dockermin-qwen7b-lora-v1`
-- HF dataset: `vladtemian/dockermin-v0` (Dockerfile + test_cmd + expected_output triples)
+- HF adapter: `vtemian/dockermin-qwen7b-lora-v1`
+- HF dataset: `vtemian/dockermin-v0` (Dockerfile + test_cmd + expected_output triples)
 - `dockermin` CLI
 - Benchmark suite + leaderboard vs 7 baselines (incl. Claude Sonnet 4.6 in agent loop)
 - Blog post writeup
