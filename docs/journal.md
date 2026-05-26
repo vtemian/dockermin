@@ -2,6 +2,32 @@
 
 Append per session. Last entry at top. 3-5 sentences per entry. What worked, what broke, what was not obvious.
 
+## 2026-05-26 - Phase 3 prep (no-pod): configs rewritten, reward validated locally
+
+Rewrote configs/dockermin_pilot.toml + dockermin_full.toml to the REAL prime-rl schema
+captured from the live alphabet_sort rl.toml during the Phase 1 smoke (the 2026-05-22
+schema was stale: top-level [[env]] -> [[orchestrator.train.env]], [sampling] ->
+[orchestrator.train.sampling], [checkpoints] -> [ckpt], learning_rate -> [trainer.optim]
+lr, dropped the bogus [infrastructure] key). Kept them minimal/mirroring the proven config;
+the launch-time pieces that can't live in toml (VLLM_USE_DEEP_GEMM=0, --inference.model
+.max-model-len for Qwen 7B's 32K context, DooD setup) are documented in the pilot header.
+Both validated with tomllib; must still pass `uv run rl @ ... --dry-run` on the pod.
+
+Env adapter (prime_env/dockermin_env) needs NO change — SingleTurnEnv/Rubric match
+verifiers 0.1.14/0.1.15, and from JSON the data types are already correct (test_cmd is
+list[str], baseline_size is int; the truncated-print "string" scare was a red herring).
+
+Built scripts/smoke_reward_replay.py — a deterministic, no-API-key reward integration
+smoke (the existing smoke_reward.py needs an Anthropic key that isn't set). Ran it against
+local Docker (arm64, Docker Desktop): all four gate outcomes scored exactly as designed —
+honest alpine shrink +0.976, non-dockerfile -0.100, test-fail +0.050, build-fail +0.000.
+So parse_gate + build_gate (docker buildx) + run_test_gate (docker run) + compute_score are
+validated end-to-end on real Docker. make quality green (137 passed).
+
+NEXT (needs pod + Vlad's credits): confirm vladtemian/dockermin-v0 is actually pushed to HF
+(the env loads it; couldn't verify locally without an HF token) — that's the first pilot
+blocker. Then DooD + egress proxy setup, then `--dry-run` the pilot config, then 50-step pilot.
+
 ## 2026-05-26 - Phase 1 PASS: stack validated end-to-end on 1xH100 ($1.75)
 
 Rented a massedcompute 1xH100 PCIe ($2.35/hr), installed prime-rl from main, and got the

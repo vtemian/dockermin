@@ -1,45 +1,62 @@
-# configs/dockermin_pilot.toml
-# Schema verified against prime-rl examples/alphabet_sort/rl.toml on
-# 2026-05-22. LoRA goes under [trainer.model.lora]; max_lora_rank
-# auto-propagates to [inference] via auto_setup_lora (PR #1392 merged
-# 2025-12-07). Top-level keys per prime-rl rl.toml convention.
+# configs/dockermin_pilot.toml — 50-step GRPO pilot (go/no-go gate)
+#
+# Schema mirrors prime-rl examples/alphabet_sort/rl.toml as captured live on the
+# pod 2026-05-26 (pin 3f5ee35). The 2026-05-22 schema was stale — verified and
+# rewritten after the Phase 1 smoke. Validate before spending GPU time with:
+#
+#   uv run --no-sync rl @ configs/dockermin_pilot.toml --dry-run
+#
+# LAUNCH incantation (NOT expressible in the toml — see docs/decisions/2026-05-22-prime-rl-pin.md):
+#   - export VLLM_USE_DEEP_GEMM=0 VLLM_MOE_USE_DEEP_GEMM=0   (CUDA-13 deep_gemm wheel vs CUDA-12 stack)
+#   - cap inference context for Qwen2.5-Coder-7B (32K default): --inference.model.max-model-len 8192
+#   - DooD + egress proxy must be up first (scripts/setup_pod_docker.sh, setup_pod_proxy.sh)
+#
+# THROUGHPUT NOTE: unlike alphabet_sort, every rollout here is a real `docker build`
+# + `docker run`. With group_size=8 × batch_size=8 = 64 builds/step, gated by
+# DOCKERMIN_MAX_BUILDS (default 6) concurrent, build wall-time dominates step time.
+# Tune batch_size / DOCKERMIN_MAX_BUILDS against observed step time on the pod.
+
 max_steps = 50
-batch_size = 8
-rollouts_per_example = 8
-learning_rate = 5e-6
-oversampling_factor = 1.5
-max_async_level = 2
-trajectory_strategy = "interleaved"
+seq_len = 4096
 
-[sampling]
-max_tokens = 1024
-temperature = 1.0
-
-[[env]]
-# Verifiers resolves env_id -> module via package_module_name(env_id),
-# which maps "dockermin-env" -> "dockermin_env" (our installed module name).
-id = "dockermin-env"
+[ckpt]
 
 [model]
 name = "Qwen/Qwen2.5-Coder-7B-Instruct"
+
+[wandb]
+project = "dockermin"
+name = "pilot-50step"
+
+[trainer.model]
+impl = "auto"
+
+[trainer.model.ac]
+freq = 1
 
 [trainer.model.lora]
 rank = 32
 alpha = 64
 
-# NCCL weight broadcast does not support LoRA (still disallowed even
-# after PR #1392). Use filesystem broadcast.
+[trainer.optim]
+lr = 5e-6
+
+# NCCL weight broadcast does not support LoRA; filesystem broadcast is the
+# colocation-safe path proven in the Phase 1 smoke.
 [trainer.weight_broadcast]
 type = "filesystem"
 
-[wandb]
-project = "dockermin"
-name = "pilot-50step"
-entity = "vladtemian"
+[orchestrator]
+batch_size = 8
+group_size = 8
 
-[checkpoints]
-interval = 25
-keep_cloud = 2
+[orchestrator.train.sampling]
+max_completion_tokens = 1024
 
-[infrastructure]
-compute_size = "S"
+[[orchestrator.train.env]]
+# verifiers maps id "dockermin-env" -> module "dockermin_env" -> load_environment().
+id = "dockermin-env"
+name = "dockermin-env"
+args = {}
+
+[inference] # defaults; max-model-len capped at launch (see header)

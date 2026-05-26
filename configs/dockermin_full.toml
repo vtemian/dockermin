@@ -1,39 +1,54 @@
-# configs/dockermin_full.toml
-# Schema verified against prime-rl examples/alphabet_sort/rl.toml on
-# 2026-05-22. See pilot.toml for schema notes.
+# configs/dockermin_full.toml — 200-step GRPO full run
+#
+# Same schema and launch notes as dockermin_pilot.toml (see its header +
+# docs/decisions/2026-05-22-prime-rl-pin.md). Promote to this only after the
+# pilot clears its go/no-go gate. Validate with:
+#
+#   uv run --no-sync rl @ configs/dockermin_full.toml --dry-run
+#
+# On 8xH100 this uses the DEFAULT split deployment (inference on some GPUs,
+# trainer on others via `rl` with --inference-gpu-ids / --trainer-gpu-ids) — no
+# single-GPU colocation hacks — but STILL needs VLLM_USE_DEEP_GEMM=0 and a capped
+# --inference.model.max-model-len for Qwen 7B.
+
 max_steps = 200
-batch_size = 32
-rollouts_per_example = 8
-learning_rate = 5e-6
-oversampling_factor = 1.5
-max_async_level = 2
-trajectory_strategy = "interleaved"
+seq_len = 4096
 
-[sampling]
-max_tokens = 1024
-temperature = 1.0
-
-[[env]]
-id = "dockermin-env"
+[ckpt]
 
 [model]
 name = "Qwen/Qwen2.5-Coder-7B-Instruct"
+
+[wandb]
+project = "dockermin"
+name = "full-200step"
+
+[trainer.model]
+impl = "auto"
+
+[trainer.model.ac]
+freq = 1
 
 [trainer.model.lora]
 rank = 32
 alpha = 64
 
+[trainer.optim]
+lr = 5e-6
+
 [trainer.weight_broadcast]
 type = "filesystem"
 
-[wandb]
-project = "dockermin"
-name = "full-200step"
-entity = "vladtemian"
+[orchestrator]
+batch_size = 32
+group_size = 8
 
-[checkpoints]
-interval = 25
-keep_cloud = 2
+[orchestrator.train.sampling]
+max_completion_tokens = 1024
 
-[infrastructure]
-compute_size = "L"
+[[orchestrator.train.env]]
+id = "dockermin-env"
+name = "dockermin-env"
+args = {}
+
+[inference] # defaults; max-model-len capped at launch (see pilot header)
