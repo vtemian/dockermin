@@ -60,3 +60,8 @@ name = "dockermin-env"
 args = {}
 
 [inference] # defaults; max-model-len capped at launch (see header)
+
+# Qwen2.5-Coder-7B is not in prime-rl MODEL_RENDERER_MAP; use the default
+# renderer (applies the tokenizer chat template). No tools -> no tool_parser.
+[orchestrator.renderer]
+name = "default"

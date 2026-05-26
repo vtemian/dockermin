@@ -18,43 +18,51 @@ from .prompts import extract_dockerfile
 _BUILD_SEM = asyncio.Semaphore(int(os.getenv("DOCKERMIN_MAX_BUILDS", "6")))
 
 
-def _block_text(block: dict[str, Any]) -> str | None:
+def _message_field(msg: object, key: str, default: str = "") -> object:
+    """Read a message/block field whether it is a dict or a pydantic object.
+
+    Verifiers passes ``AssistantMessage`` instances at rollout time but plain
+    dicts when a serialized rollout is replayed, so a reward that only understood
+    dicts silently scored every live completion as empty (parse failure).
+    """
+    if isinstance(msg, dict):
+        return msg.get(key, default)
+    return getattr(msg, key, default)
+
+
+def _block_text(block: object) -> str | None:
     """Text of one Anthropic-style content block, or None to skip it."""
-    text = block.get("text") or block.get("content") or ""
+    text = _message_field(block, "text", "") or _message_field(block, "content", "") or ""
     return text if isinstance(text, str) else None
 
 
-def _message_parts(msg: dict[str, Any]) -> list[str]:
+def _message_parts(msg: object) -> list[str]:
     """Text fragments contributed by one message; empty for skipped messages."""
-    role = msg.get("role", "assistant")
+    role = _message_field(msg, "role", "assistant")
     if role and role != "assistant":
         return []
-    content = msg.get("content", "")
+    content = _message_field(msg, "content", "")
     if isinstance(content, str):
         return [content]
     if isinstance(content, list):
         # Anthropic-style content blocks: [{type:'text', text:'...'}, ...]
-        block_texts = (_block_text(block) for block in content if isinstance(block, dict))
+        block_texts = (_block_text(block) for block in content)
         return [t for t in block_texts if t is not None]
-    return [str(content)]
+    return [str(content)] if content else []
 
 
-def _completion_text(completion: str | list[dict[str, Any]]) -> str:
-    """Verifiers passes completion either as str or list[message].
+def _completion_text(completion: str | list[Any]) -> str:
+    """Verifiers passes completion as a str, a list of message dicts, or a list of
+    pydantic message objects (e.g. ``AssistantMessage``).
 
-    Assumption: when given a list, we concatenate the ``content`` of every
-    assistant-role message (and any dict without an explicit role) so that
-    multi-block completions (e.g. assistant + tool_use + assistant) are
-    surfaced to ``extract_dockerfile``. Non-string contents are stringified.
+    We concatenate the ``content`` of every assistant-role message so that
+    multi-block completions are surfaced to ``extract_dockerfile``. Non-string
+    contents are stringified.
     """
     if isinstance(completion, str):
         return completion
     if isinstance(completion, list):
-        parts: list[str] = []
-        for msg in completion:
-            if isinstance(msg, dict):
-                parts.extend(_message_parts(msg))
-        return "\n".join(parts)
+        return "\n".join(part for msg in completion for part in _message_parts(msg))
     return ""
 
 
