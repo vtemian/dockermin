@@ -2,6 +2,20 @@
 
 Append per session. Last entry at top. 3-5 sentences per entry. What worked, what broke, what was not obvious.
 
+## 2026-05-26 - Phase 1 start: prime CLI fixed, prime-rl pin verified
+
+Verified prime-rl PR #1392 (LoRA + NCCL `adapter_only` crash) is MERGED (commit 91182b7,
+2025-12-07); main is 686 commits past it, so we install from main and capture the exact
+HEAD on the pod as the real pin. Decision recorded in docs/decisions/2026-05-22-prime-rl-pin.md.
+The `prime` CLI from PyPI (prime_cli 0.6.9) ships BROKEN against current deps: typer 0.26.0
+vendored Click internally, but prime_cli still imports external `click`, so a vendored-click
+Context gets passed into external-click code paths and dies with
+`AttributeError: 'Context' object has no attribute '_param_default_explicit'`
+(and `_default_map_has` on the next click down). Fix: pin `typer<0.26` —
+`uv tool install --force prime --with "typer<0.26"` lands typer 0.25.1 + click 8.3.3 and the
+CLI runs clean. Smoke script smoke_lora_hotswap.py confirmed ready (NameError already fixed).
+Blocked on Vlad's Prime Intellect signup + auth before I can drive pod rental.
+
 ## 2026-05-25 - dataset growth COMPLETE (Phase 4 done)
 
 The dataset-growth plan landed. Final set: **145 rows = 28 bases + 117 variants**
