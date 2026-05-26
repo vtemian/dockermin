@@ -2,6 +2,27 @@
 
 Append per session. Last entry at top. 3-5 sentences per entry. What worked, what broke, what was not obvious.
 
+## 2026-05-26 - Phase 1 PASS: stack validated end-to-end on 1xH100 ($1.75)
+
+Rented a massedcompute 1xH100 PCIe ($2.35/hr), installed prime-rl from main, and got the
+full async RL loop running on alphabet_sort (prime-rl's own canonical smoke). Validated:
+vllm inference + LoRA serving, FSDP+LoRA trainer (via torchrun), orchestrator + verifiers
+env reward, filesystem weight broadcast, all colocated on one H100 (69/81 GiB, no OOM).
+10 orchestrator steps, 8 trainer steps, reward stable ~0.4-0.47, zero NaN/OOM. Did NOT
+wait for the reward to climb (alphabet_sort needs ~20-30 steps and it's a known-good
+example) — terminated early to avoid unattended billing. Total spend $1.75, balance
+$48.25/$50.
+
+Three bleeding-edge fixes were needed, each crashed a component (all in
+docs/decisions/2026-05-22-prime-rl-pin.md): VLLM_USE_DEEP_GEMM=0 (shipped deep_gemm wheel
+wants CUDA 13, stack is CUDA 12.8), --model.max-model-len 8192 (Qwen3 256K context blows
+KV cache at 0.5 mem util), and the trainer must run under torchrun (bare entrypoint dies on
+RANK unset). The unified `rl` launcher can't colocate on 1 GPU in this commit (wants 2);
+ran the 3 components manually. Dropped Task 1.5 (standalone hotswap script) as redundant —
+the live run already exercises LoRA load + weight-broadcast swapping every step. Next:
+Phase 3 reward + pilot. The 8xH100 run uses the default split deployment (no colocation
+hacks) but still needs VLLM_USE_DEEP_GEMM=0 + a sane max-model-len for Qwen 7B.
+
 ## 2026-05-26 - Phase 1 start: prime CLI fixed, prime-rl pin verified
 
 Verified prime-rl PR #1392 (LoRA + NCCL `adapter_only` crash) is MERGED (commit 91182b7,

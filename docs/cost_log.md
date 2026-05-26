@@ -12,4 +12,4 @@ Tracks compute spend against the $400 cap. Append per session, do not edit prior
 
 | Date | Session | Provider | Resource | Start | End | Hours | $/hr | Cost | Cumulative |
 |------|---------|----------|----------|-------|-----|-------|------|------|------------|
-| 2026-05-26 | 1.2-1.6 smoke (dev pod) | massedcompute | 1xH100 80GB PCIe | 2026-05-26T16:47:51Z | | | $2.35 | | |
+| 2026-05-26 | 1.2-1.6 smoke (dev pod) | massedcompute | 1xH100 80GB PCIe | 2026-05-26T16:47:51Z | 2026-05-26T17:34:50Z | 0.78 | $2.35 | $1.75 | $1.75 |
