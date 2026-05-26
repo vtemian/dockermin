@@ -3,8 +3,10 @@ name = "dockermin-env"
 version = "0.0.1"
 dependencies = ["verifiers", "datasets", "dockermin"]
 
+# Name matches the env id used in configs (`dockermin-env`) and avoids colliding
+# with the `dockermin` library package, which verifiers would import by mistake.
 [project.entry-points."verifiers.environments"]
-dockermin = "dockermin_env.dockermin_env:load_environment"
+dockermin-env = "dockermin_env.dockermin_env:load_environment"
 
 [tool.setuptools]
 packages = ["dockermin_env"]
