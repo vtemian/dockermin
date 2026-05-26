@@ -12,7 +12,7 @@
 # --inference.model.max-model-len for Qwen 7B.
 
 max_steps = 200
-seq_len = 4096
+seq_len = 8192
 
 [ckpt]
 
@@ -40,11 +40,11 @@ lr = 5e-6
 type = "filesystem"
 
 [orchestrator]
-batch_size = 32
+batch_size = 8
 group_size = 8
 
 [orchestrator.train.sampling]
-max_completion_tokens = 1024
+max_completion_tokens = 2048
 
 [[orchestrator.train.env]]
 id = "dockermin-env"
