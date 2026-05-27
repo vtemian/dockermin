@@ -36,7 +36,11 @@ echo "[$(date -u)] eval start (pod $POD_ID)" >>"$LOG"
 
 # GPU split: model baselines each get their own process so the 7B handles do not
 # coexist on the GPU. Non-GPU/API baselines run together first.
-"$PY" "$RUN_EVAL" --baselines hadolint slim manual gpt4o sonnet_zs agent_loop --out "$OUT" >>"$LOG" 2>&1
+# slim (broken build-instrumentation on this pod) and agent_loop (a ~6h/$18
+# build-fix loop that would blow the watchdog) are deferred to a focused run;
+# sonnet_zs is the Sonnet bar tonight. qwen_zs + dockermin (both transformers)
+# each get their own process so the two 7B models never coexist on the GPU.
+"$PY" "$RUN_EVAL" --baselines hadolint manual gpt4o sonnet_zs --out "$OUT" >>"$LOG" 2>&1
 "$PY" "$RUN_EVAL" --baselines qwen_zs --out "$OUT" >>"$LOG" 2>&1
 "$PY" "$RUN_EVAL" --baselines dockermin --out "$OUT" >>"$LOG" 2>&1
 
