@@ -12,7 +12,10 @@
 # --inference.model.max-model-len for Qwen 7B.
 
 max_steps = 200
-seq_len = 8192
+# seq_len 5120 = max prompt (~3072) + completion (2048). Higher (6144/8192) OOMs the
+# 7B trainer when colocated with inference. LAUNCH inference at --gpu-memory-utilization 0.30
+# --model.max-model-len 5120 (0.35 leaves too little; trainer peaks ~74/79 GiB).
+seq_len = 5120
 
 [ckpt]
 
