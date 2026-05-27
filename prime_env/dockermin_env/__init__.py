@@ -5,6 +5,8 @@ imported package, so the entrypoint must be exposed at the package root (not onl
 in the same-named submodule).
 """
 
+from __future__ import annotations
+
 from dockermin_env.dockermin_env import load_environment
 
 __all__ = ["load_environment"]

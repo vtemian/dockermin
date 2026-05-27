@@ -2,6 +2,31 @@
 
 Append per session. Last entry at top. 3-5 sentences per entry. What worked, what broke, what was not obvious.
 
+## 2026-05-27 - FULL RUN: adapter trained (151/200) + shipped to HF
+
+GRPO full run on Qwen2.5-Coder-7B trained 151 steps before the orchestrator crashed with
+"All 8 rollouts were filtered out on 3 consecutive attempts at step 151" — the zero-advantage
+filter: a batch where all rollouts scored identically (no reward variance, exactly Vlad's
+duplicate-dockerfile concern) -> GRPO can't compute advantage -> prime-rl crashes the orchestrator
+by design after 3 retries. The trainer trained cleanly to 150 (Loss building 0.0->0.01, real
+gradient signal, rewards clean-positive after the seq-5120/completion-2048 truncation fix). The
+LoRA adapter was NOT lost despite [ckpt]=end-only: the filesystem weight-broadcast writes a
+per-step adapter to outputs/run_default/broadcasts/step_<N>/ (adapter_model.safetensors +
+adapter_config.json + STABLE marker). Pushed step_151 (323MB, rank-32) to
+**vtemian/dockermin-qwen7b-lora-v1**. Pod terminated.
+
+Memory bound (hard-won): inference 0.30 + seq_len 5120 colocated peaks ~77.4/79 GiB and
+PLATEAUS there (held flat steps 50->151, no OOM). seq 6144 too tight, seq 8192 OOM'd. Step
+time ~130-165s (build-bound). Real training ~5.5h (08:08->13:24).
+
+COST MISS (honest): this pod ran ~19h / ~$45 — I badly undercounted ("~$9" for hours) and left
+it billing through ~10h of overnight idle/crash-debug gaps (~$20+ wasted). Should have terminated
+during gaps. Going forward: terminate any time the pod is not actively training.
+
+Follow-ups for v1: periodic checkpointing (resume not lose on crash); handle the zero-advantage
+crash (skip degenerate batches / shuffle data / larger batch for variance); content-hash reward
+cache; fix audit_rollouts.py completion bug.
+
 ## 2026-05-26 - HF namespace fix (vladtemian -> vtemian) + dataset PUSHED
 
 The whole project referenced `vladtemian/` HF slugs, but Vlad's actual HF account is
