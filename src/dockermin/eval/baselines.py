@@ -583,7 +583,10 @@ def baseline_manual_best_practice(triple: dict[str, Any]) -> EvalEntry:
         df = _fix_dl3015(df)  # (b) --no-install-recommends
         df = _fix_dl3009(df)  # (c) rm -rf /var/lib/apt/lists/*
         df = _fix_dl3042(df)  # (d) pip --no-cache-dir
-        df = _collapse_consecutive_runs(df)  # (e) collapse RUNs
+        # (e) RUN-collapse intentionally dropped: it mangles multi-line RUN bodies
+        # (internal `&&` + backslash continuations) and build-fails the result,
+        # which would make this an unfairly-broken baseline. The layer-merge saving
+        # is marginal next to the base-swap + cache-cleanup transforms above.
         return _entry("manual", triple, df, t0)
     except Exception as e:  # noqa: BLE001 — safety net: one bad Dockerfile must not crash the eval loop
         return _error_entry("manual", triple, t0, f"manual error: {e!r}")
