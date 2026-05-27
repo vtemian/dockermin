@@ -121,43 +121,39 @@ def _error_entry(name: str, triple: dict[str, Any], t0: float, err: str) -> Eval
 
 
 # ---------------------------------------------------------------------------
-# Baseline 1: Qwen 2.5 Coder 7B zero-shot (offline vLLM)
+# Baseline 1: Qwen 2.5 Coder 7B zero-shot (transformers)
 # ---------------------------------------------------------------------------
-# Lazy module-level handle so the heavyweight vllm import + model load happens
-# at most once per process.
-_VLLM_HANDLE: dict[str, Any] = {}
+# Loaded via transformers (NOT vLLM) so it mirrors the dockermin baseline exactly
+# — same engine, the only difference being the LoRA adapter — and so it needs no
+# CUDA toolkit. vLLM's prime build enters a DeepGEMM/FP8 path that requires nvcc,
+# which the inference pods do not ship; transformers avoids that entirely.
+_BASE_HANDLE: dict[str, Any] = {}
 
 
-def _vllm_qwen() -> tuple[Any, Any]:
-    """Lazy-load vLLM and the base Qwen model. GPU-only."""
-    if "llm" in _VLLM_HANDLE:
-        return _VLLM_HANDLE["llm"], _VLLM_HANDLE["tok"]
-    from transformers import AutoTokenizer
-    from vllm import LLM  # lazy: only available on GPU pod
+def _hf_base() -> tuple[Any, Any]:
+    """Lazy-load base Qwen 2.5 Coder 7B (no adapter) via transformers."""
+    if "model" in _BASE_HANDLE:
+        return _BASE_HANDLE["model"], _BASE_HANDLE["tok"]
+    from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    model_id = "Qwen/Qwen2.5-Coder-7B-Instruct"
-    _VLLM_HANDLE["llm"] = LLM(model=model_id, dtype="bfloat16", gpu_memory_utilization=0.85)
-    _VLLM_HANDLE["tok"] = AutoTokenizer.from_pretrained(model_id)
-    return _VLLM_HANDLE["llm"], _VLLM_HANDLE["tok"]
-
-
-def _vllm_generate(messages: list[dict[str, Any]], max_tokens: int = 1024, temperature: float = 0.2) -> str:
-    from vllm import SamplingParams
-
-    llm, tok = _vllm_qwen()
-    prompt = tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    sp = SamplingParams(temperature=temperature, max_tokens=max_tokens)
-    outs = llm.generate([prompt], sp)
-    text: str = outs[0].outputs[0].text
-    return text
+    base_id = "Qwen/Qwen2.5-Coder-7B-Instruct"
+    tok = AutoTokenizer.from_pretrained(base_id)
+    model = AutoModelForCausalLM.from_pretrained(base_id, torch_dtype="bfloat16", device_map="auto")
+    _BASE_HANDLE["model"] = model
+    _BASE_HANDLE["tok"] = tok
+    return model, tok
 
 
 def baseline_qwen_zero_shot(triple: dict[str, Any]) -> EvalEntry:
-    """Base Qwen 2.5 Coder 7B with the standard prompt, no fine-tuning."""
+    """Base Qwen 2.5 Coder 7B with the standard prompt, no fine-tuning (transformers)."""
     t0 = time.perf_counter()
     try:
         msgs = format_messages(triple["dockerfile"])
-        text = _vllm_generate(msgs)
+        model, tok = _hf_base()
+        prompt = tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
+        enc = tok(prompt, return_tensors="pt").to(model.device)
+        out = model.generate(**enc, max_new_tokens=1024, temperature=0.2, do_sample=True)
+        text = tok.decode(out[0][enc.input_ids.shape[1] :], skip_special_tokens=True)
         new_df = extract_dockerfile(text)
         if new_df is None:
             return _error_entry("qwen_zs", triple, t0, "no fenced dockerfile block")
