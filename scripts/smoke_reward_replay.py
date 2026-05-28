@@ -53,7 +53,7 @@ CASES = (
         name="build failure (RUN exits non-zero)",
         completion=_fenced('FROM alpine:3.20\nRUN exit 1\nCMD ["true"]'),
         info={"baseline_size": 100_000_000, "test_cmd": ["sh", "-c", "echo PYOK"], "expected_substring": "PYOK"},
-        expect="build-fail score (0.0)",
+        expect="build-fail score (~0.015, BUILD_FAIL_SCORE + small per-cmd credit)",
     ),
 )
 
