@@ -9,6 +9,13 @@ import pytest
 from dockermin.dataset.annotate import BuildResult, ParseResult, TestResult
 from dockermin.reward import dockermin_reward as dr_mod
 from dockermin.reward.dockermin_reward import dockermin_reward
+from dockermin.reward.gates import (
+    BUILD_FAIL_CMD_CREDIT_MAX,
+    BUILD_FAIL_SCORE,
+    CMD_CREDIT_PER_CMD,
+    PARSE_FAIL_SCORE,
+    compute_score,
+)
 
 
 class _AssistantMessage:
@@ -82,3 +89,63 @@ def test_dockermin_reward_happy_path_clean_shrink(monkeypatch: pytest.MonkeyPatc
     score = asyncio.run(dockermin_reward(completion=completion, info=info))
     # 0.5 base + 0.5 * 0.2 reduction + 0 shape (no distroless/alpine/multi-stage cues)
     assert score == pytest.approx(0.6, abs=0.001)
+
+
+def test_build_fail_partial_credit_scales_with_command_count() -> None:
+    """A 5-instruction build-fail must score lower than a 20-instruction build-fail,
+    so GRPO groups with mixed-complexity build failures have non-zero reward variance."""
+    small = compute_score(
+        parse_ok=True, build_ok=False, test_ok=False,
+        command_count=5, baseline_size=100, new_size=0, dockerfile_text="",
+    )
+    big = compute_score(
+        parse_ok=True, build_ok=False, test_ok=False,
+        command_count=20, baseline_size=100, new_size=0, dockerfile_text="",
+    )
+    assert small == pytest.approx(BUILD_FAIL_SCORE + 5 * CMD_CREDIT_PER_CMD)
+    assert big > small
+    assert big <= BUILD_FAIL_SCORE + BUILD_FAIL_CMD_CREDIT_MAX  # cap honoured
+
+
+def test_build_fail_partial_credit_saturates_at_cap() -> None:
+    """Even a 200-instruction build-fail must not score higher than the cap, otherwise
+    a degenerate verbose Dockerfile could out-reward a buildable one."""
+    huge = compute_score(
+        parse_ok=True, build_ok=False, test_ok=False,
+        command_count=200, baseline_size=100, new_size=0, dockerfile_text="",
+    )
+    assert huge == pytest.approx(BUILD_FAIL_SCORE + BUILD_FAIL_CMD_CREDIT_MAX)
+
+
+def test_test_fail_partial_credit_separates_from_build_fail() -> None:
+    """A test-failing build must always score higher than a build-failing one with the
+    same command count — preserves the gate order even with smoothing."""
+    bf = compute_score(
+        parse_ok=True, build_ok=False, test_ok=False,
+        command_count=10, baseline_size=100, new_size=0, dockerfile_text="",
+    )
+    tf = compute_score(
+        parse_ok=True, build_ok=True, test_ok=False,
+        command_count=10, baseline_size=100, new_size=80, dockerfile_text="",
+    )
+    assert tf > bf
+
+
+def test_full_pass_unchanged_by_smoothing() -> None:
+    """The pass-rung formula (0.5 + 0.5*dense + shape) must not be touched."""
+    s = compute_score(
+        parse_ok=True, build_ok=True, test_ok=True,
+        command_count=5, baseline_size=1000, new_size=500, dockerfile_text="",
+    )
+    # 50% reduction, no shape -> 0.5 + 0.5*0.5 = 0.75
+    assert s == pytest.approx(0.75)
+
+
+def test_parse_fail_unchanged() -> None:
+    """The parse-fail rung is not smoothed (a non-parseable Dockerfile has no useful
+    command_count to credit)."""
+    s = compute_score(
+        parse_ok=False, build_ok=False, test_ok=False,
+        command_count=0, baseline_size=100, new_size=0, dockerfile_text="",
+    )
+    assert s == PARSE_FAIL_SCORE
