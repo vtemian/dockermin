@@ -184,3 +184,76 @@ def test_parse_fail_unchanged() -> None:
         dockerfile_text="",
     )
     assert s == PARSE_FAIL_SCORE
+
+
+def test_partial_credit_caps_at_baseline_plus_two_when_baseline_provided() -> None:
+    """Pad-hack guard: a 100-cmd build-fail with baseline=5 cmds must score the same
+    as a 7-cmd build-fail (baseline+2), preventing reward gaming via no-op LABELs."""
+    padded = compute_score(
+        parse_ok=True,
+        build_ok=False,
+        test_ok=False,
+        command_count=100,
+        baseline_size=100,
+        new_size=0,
+        dockerfile_text="",
+        baseline_command_count=5,
+    )
+    capped = compute_score(
+        parse_ok=True,
+        build_ok=False,
+        test_ok=False,
+        command_count=7,
+        baseline_size=100,
+        new_size=0,
+        dockerfile_text="",
+        baseline_command_count=5,
+    )
+    assert padded == pytest.approx(capped)  # 0.0 + 0.02 * 7 = 0.14
+
+
+def test_partial_credit_unchanged_when_baseline_not_provided() -> None:
+    """Back-compat: callers that omit baseline_command_count get the old behavior
+    (uncapped per-cmd credit, capped only at BUILD_FAIL_CMD_CREDIT_MAX)."""
+    score = compute_score(
+        parse_ok=True,
+        build_ok=False,
+        test_ok=False,
+        command_count=100,
+        baseline_size=100,
+        new_size=0,
+        dockerfile_text="",
+    )
+    assert score == pytest.approx(BUILD_FAIL_SCORE + BUILD_FAIL_CMD_CREDIT_MAX)  # 0.30
+
+
+def test_rung_order_preserved_at_caps() -> None:
+    """Max build_fail must remain strictly less than min test_fail (gate ordering).
+
+    The lowest cmd_count that still reaches the test_fail rung is MIN_COMMANDS=2
+    (anything smaller is captured by the too_few rung at -0.2), so the reachable
+    minimum test_fail score is TEST_FAIL_SCORE + 2 * CMD_CREDIT_PER_CMD = 0.39.
+    """
+    from dockermin.reward.gates import MIN_COMMANDS, TEST_FAIL_SCORE
+
+    max_bf = compute_score(
+        parse_ok=True,
+        build_ok=False,
+        test_ok=False,
+        command_count=200,
+        baseline_size=100,
+        new_size=0,
+        dockerfile_text="",
+    )
+    min_tf = compute_score(
+        parse_ok=True,
+        build_ok=True,
+        test_ok=False,
+        command_count=MIN_COMMANDS,
+        baseline_size=100,
+        new_size=80,
+        dockerfile_text="",
+    )
+    assert max_bf < min_tf
+    assert max_bf == pytest.approx(0.30)
+    assert min_tf == pytest.approx(TEST_FAIL_SCORE + MIN_COMMANDS * CMD_CREDIT_PER_CMD)  # 0.39

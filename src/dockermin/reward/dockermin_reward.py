@@ -83,6 +83,7 @@ async def dockermin_reward(  # noqa: PLR0911, PLR0915 — each return is a disti
         baseline_size = info["baseline_size"]
         test_cmd = info["test_cmd"]
         expected = info.get("expected_substring", "")
+        baseline_command_count = info.get("baseline_command_count")
     except (KeyError, TypeError):
         return 0.0  # malformed sample: defined score, not a swallowed raise
 
@@ -97,6 +98,7 @@ async def dockermin_reward(  # noqa: PLR0911, PLR0915 — each return is a disti
             baseline_size=baseline_size,
             new_size=0,
             dockerfile_text=new_df,
+            baseline_command_count=baseline_command_count,
         )
     async with _BUILD_SEM:
         try:
@@ -110,6 +112,7 @@ async def dockermin_reward(  # noqa: PLR0911, PLR0915 — each return is a disti
                     baseline_size=baseline_size,
                     new_size=0,
                     dockerfile_text=new_df,
+                    baseline_command_count=baseline_command_count,
                 )
             t = await asyncio.to_thread(run_test_gate, b.tag, test_cmd, expected, 30)
         except Exception:  # noqa: BLE001 - docker hiccup -> score as build failure, never crash the loop
@@ -121,6 +124,7 @@ async def dockermin_reward(  # noqa: PLR0911, PLR0915 — each return is a disti
                 baseline_size=baseline_size,
                 new_size=0,
                 dockerfile_text=new_df,
+                baseline_command_count=baseline_command_count,
             )
     return compute_score(
         parse_ok=True,
@@ -130,4 +134,5 @@ async def dockermin_reward(  # noqa: PLR0911, PLR0915 — each return is a disti
         baseline_size=baseline_size,
         new_size=b.size_bytes,
         dockerfile_text=new_df,
+        baseline_command_count=baseline_command_count,
     )

@@ -5,6 +5,7 @@ from __future__ import annotations
 import verifiers as vf
 from datasets import load_dataset
 
+from dockermin.dataset.annotate import parse_gate
 from dockermin.reward.dockermin_reward import dockermin_reward
 from dockermin.reward.prompts import SYSTEM_PROMPT, USER_TEMPLATE
 
@@ -26,6 +27,10 @@ def load_environment(**_kwargs) -> vf.Environment:
                 "baseline_size": ex["baseline_size"],
                 "test_cmd": ex["test_cmd"],
                 "expected_substring": ex["expected_substring"],
+                # baseline_command_count caps the pad-the-Dockerfile reward hack:
+                # the reward function uses min(rewrite.cmd_count, baseline+2) as
+                # the effective cmd count for partial credit on failure rungs.
+                "baseline_command_count": parse_gate(ex["dockerfile"]).command_count,
             },
             "answer": "",  # not used for free-form reward
         }

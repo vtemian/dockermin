@@ -43,7 +43,7 @@ def test_compute_score_build_fail_returns_smoothed_credit() -> None:
         new_size=0,
         dockerfile_text="...",
     )
-    assert s == pytest.approx(0.015)
+    assert s == pytest.approx(0.06)
 
 
 def test_compute_score_test_fail_returns_smoothed_credit() -> None:
@@ -56,7 +56,7 @@ def test_compute_score_test_fail_returns_smoothed_credit() -> None:
         new_size=80,
         dockerfile_text="...",
     )
-    assert s == pytest.approx(0.065)
+    assert s == pytest.approx(0.41)
 
 
 def test_compute_score_test_pass_full_reduction_returns_around_one() -> None:
@@ -83,7 +83,9 @@ def test_shape_bonus_gated_on_test_pass() -> None:
         new_size=20,
         dockerfile_text="FROM alpine\nRUN whatever",
     )
-    assert s == pytest.approx(0.065)  # smoothed test-fail credit; alpine shape bonus still gated off
+    assert s == pytest.approx(
+        0.41
+    )  # smoothed test-fail credit (0.35 floor + 0.06 cmd credit); alpine shape bonus still gated off
 
 
 def test_from_scratch_with_leading_copy_no_penalty() -> None:

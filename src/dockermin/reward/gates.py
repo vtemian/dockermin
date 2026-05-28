@@ -9,22 +9,32 @@ MIN_COMMANDS = 2
 PARSE_FAIL_SCORE = -0.1
 TOO_FEW_COMMANDS_SCORE = -0.2
 BUILD_FAIL_SCORE = 0.0
-TEST_FAIL_SCORE = 0.05
+TEST_FAIL_SCORE = 0.35
 
-# Smoothing on the failure rungs. Without this, ~40% of early-training rollouts
-# collapse to BUILD_FAIL_SCORE (0.0) — and 8-rollout GRPO groups with >=5
-# build-fails have zero advantage -> wasted batch. Adding a small command-count
-# credit ensures two distinct-but-broken Dockerfiles do not score identically.
-# Caps are kept well below TEST_FAIL_SCORE->PASS gradient (0.05 -> 0.5) so the
-# gate-order incentives (broken < buildable < passing) are preserved.
-CMD_CREDIT_PER_CMD = 0.005
-BUILD_FAIL_CMD_CREDIT_MAX = 0.10  # saturates at command_count >= 20
-TEST_FAIL_CMD_CREDIT_MAX = 0.15  # buildable-but-failing earns more than broken
+# Smoothing on the failure rungs. The v1 magnitudes (per-cmd=0.005, caps 0.10/0.15)
+# were 4x too small for the actual dataset's command_count distribution: 47% of
+# training prompts already saturated the build-fail cap, so smoothing produced
+# zero variance for them. v1.1 quadruples the per-cmd credit to 0.02 and lifts
+# the build-fail cap to 0.30, then raises TEST_FAIL_SCORE to 0.35 to preserve
+# the rung invariant max(build_fail) < min(test_fail) < pass floor (0.5).
+# Saturation knees: build_fail at cc = 0.30/0.02 = 15 (median dataset cc=19,
+# so most prompts span the credit ramp); test_fail at cc = 0.10/0.02 = 5.
+CMD_CREDIT_PER_CMD = 0.02
+BUILD_FAIL_CMD_CREDIT_MAX = 0.30  # saturates at command_count >= 15
+TEST_FAIL_CMD_CREDIT_MAX = 0.10  # smaller ramp; floor (0.35) carries the rung
 
 
-def _cmd_partial_credit(command_count: int, cap: float) -> float:
-    """Per-instruction partial credit on the failure rungs, capped."""
-    return min(cap, CMD_CREDIT_PER_CMD * max(0, command_count))
+def _cmd_partial_credit(command_count: int, cap: float, baseline_command_count: int | None = None) -> float:
+    """Per-instruction partial credit on the failure rungs, capped.
+
+    baseline_command_count, when provided, caps the EFFECTIVE command_count at
+    baseline+2 — closes the pad-the-Dockerfile hack where the model emits no-op
+    LABEL or RUN echo lines to inflate the credit.
+    """
+    effective = command_count
+    if baseline_command_count is not None:
+        effective = min(command_count, baseline_command_count + 2)
+    return min(cap, CMD_CREDIT_PER_CMD * max(0, effective))
 
 
 # Cache-hygiene substrings and their additive shape bonus.
@@ -96,17 +106,22 @@ def compute_score(  # noqa: PLR0913 — every gate outcome + size measurement fe
     baseline_size: int,
     new_size: int,
     dockerfile_text: str,
+    baseline_command_count: int | None = None,
 ) -> float:
     """Composite reward. Keyword-only API is fixed by callers and tests."""
     # Gate ladder: first failing gate fixes the score; full pipeline must pass
     # to reach dense + shape scoring below. Build/test rungs now carry a small
     # per-command-count credit so two distinct-but-broken Dockerfiles do not
     # score identically — that's what was collapsing GRPO advantage in v0.
+    # baseline_command_count caps the effective cmd-count at baseline+2 to
+    # close the LABEL/RUN-echo padding hack.
+    bf_credit = _cmd_partial_credit(command_count, BUILD_FAIL_CMD_CREDIT_MAX, baseline_command_count)
+    tf_credit = _cmd_partial_credit(command_count, TEST_FAIL_CMD_CREDIT_MAX, baseline_command_count)
     gate_failures = (
         (not parse_ok, PARSE_FAIL_SCORE),
         (command_count < MIN_COMMANDS, TOO_FEW_COMMANDS_SCORE),
-        (not build_ok, BUILD_FAIL_SCORE + _cmd_partial_credit(command_count, BUILD_FAIL_CMD_CREDIT_MAX)),
-        (not test_ok, TEST_FAIL_SCORE + _cmd_partial_credit(command_count, TEST_FAIL_CMD_CREDIT_MAX)),
+        (not build_ok, BUILD_FAIL_SCORE + bf_credit),
+        (not test_ok, TEST_FAIL_SCORE + tf_credit),
     )
     for failed, score in gate_failures:
         if failed:
