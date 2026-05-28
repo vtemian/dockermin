@@ -11,10 +11,14 @@
 # single-GPU colocation hacks — but STILL needs VLLM_USE_DEEP_GEMM=0 and a capped
 # --inference.model.max-model-len for Qwen 7B.
 
-max_steps = 500
+max_steps = 250
 # seq_len 5120 = max prompt (~3072) + completion (2048). Higher (6144/8192) OOMs the
 # 7B trainer when colocated with inference. LAUNCH inference at --gpu-memory-utilization 0.30
 # --model.max-model-len 5120 (0.35 leaves too little; trainer peaks ~74/79 GiB).
+# v1.1 batch tuning (2026-05-28): batch_size 8->16, group_size 8->16, max_steps 500->250.
+# Rationale: 64 rollouts/step (v1) is 32x below the smallest published GRPO success per
+# the multi-agent audit; bumping to 256 rollouts/step drops P(fully-degenerate group)
+# from ~50% to <1%. Per-step wall-time is ~4x; halving max_steps keeps total compute equal.
 seq_len = 5120
 
 # Periodic checkpoints so a mid-run failure is recoverable AND we have learning-curve
@@ -48,8 +52,8 @@ lr = 5e-6
 type = "filesystem"
 
 [orchestrator]
-batch_size = 8
-group_size = 8
+batch_size = 16
+group_size = 16
 
 [orchestrator.train.sampling]
 max_completion_tokens = 2048
