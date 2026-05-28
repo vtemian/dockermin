@@ -11,6 +11,22 @@ TOO_FEW_COMMANDS_SCORE = -0.2
 BUILD_FAIL_SCORE = 0.0
 TEST_FAIL_SCORE = 0.05
 
+# Smoothing on the failure rungs. Without this, ~40% of early-training rollouts
+# collapse to BUILD_FAIL_SCORE (0.0) — and 8-rollout GRPO groups with >=5
+# build-fails have zero advantage -> wasted batch. Adding a small command-count
+# credit ensures two distinct-but-broken Dockerfiles do not score identically.
+# Caps are kept well below TEST_FAIL_SCORE->PASS gradient (0.05 -> 0.5) so the
+# gate-order incentives (broken < buildable < passing) are preserved.
+CMD_CREDIT_PER_CMD = 0.005
+BUILD_FAIL_CMD_CREDIT_MAX = 0.10  # saturates at command_count >= 20
+TEST_FAIL_CMD_CREDIT_MAX = 0.15  # buildable-but-failing earns more than broken
+
+
+def _cmd_partial_credit(command_count: int, cap: float) -> float:
+    """Per-instruction partial credit on the failure rungs, capped."""
+    return min(cap, CMD_CREDIT_PER_CMD * max(0, command_count))
+
+
 # Cache-hygiene substrings and their additive shape bonus.
 _SUBSTRING_BONUSES = (
     ("rm -rf /var/lib/apt/lists", 0.02),
@@ -83,12 +99,14 @@ def compute_score(  # noqa: PLR0913 — every gate outcome + size measurement fe
 ) -> float:
     """Composite reward. Keyword-only API is fixed by callers and tests."""
     # Gate ladder: first failing gate fixes the score; full pipeline must pass
-    # to reach dense + shape scoring below.
+    # to reach dense + shape scoring below. Build/test rungs now carry a small
+    # per-command-count credit so two distinct-but-broken Dockerfiles do not
+    # score identically — that's what was collapsing GRPO advantage in v0.
     gate_failures = (
         (not parse_ok, PARSE_FAIL_SCORE),
         (command_count < MIN_COMMANDS, TOO_FEW_COMMANDS_SCORE),
-        (not build_ok, BUILD_FAIL_SCORE),
-        (not test_ok, TEST_FAIL_SCORE),
+        (not build_ok, BUILD_FAIL_SCORE + _cmd_partial_credit(command_count, BUILD_FAIL_CMD_CREDIT_MAX)),
+        (not test_ok, TEST_FAIL_SCORE + _cmd_partial_credit(command_count, TEST_FAIL_CMD_CREDIT_MAX)),
     )
     for failed, score in gate_failures:
         if failed:
