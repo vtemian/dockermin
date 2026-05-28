@@ -7,6 +7,8 @@ import random
 from pathlib import Path
 
 from dockermin.ops import read_jsonl
+from dockermin.reward.dockermin_reward import _completion_text
+from dockermin.reward.prompts import extract_dockerfile
 
 
 def audit(rollouts_dir: Path) -> dict:
@@ -14,9 +16,13 @@ def audit(rollouts_dir: Path) -> dict:
     for f in rollouts_dir.glob("*.jsonl"):
         rollouts.extend(read_jsonl(f))
     sample = random.sample(rollouts, min(20, len(rollouts)))
-    # Normalize to lowercase once so substring checks are case-insensitive
-    # (catches ":LATEST", ":Latest", "Cmd", "EntryPoint", etc.).
-    texts = [r.get("completion", "").lower() for r in sample]
+    # prime-rl emits completions as list[AssistantMessage]; the reward path unwraps via
+    # _completion_text + extract_dockerfile, and the audit must mirror that or every
+    # substring check silently misses (str(list) noise instead of dockerfile text).
+    texts = []
+    for r in sample:
+        extracted = extract_dockerfile(_completion_text(r.get("completion", ""))) or ""
+        texts.append(extracted.lower())
     stats = {
         "n": len(sample),
         "from_scratch": sum(1 for t in texts if "from scratch" in t),
