@@ -11,13 +11,18 @@
 # single-GPU colocation hacks — but STILL needs VLLM_USE_DEEP_GEMM=0 and a capped
 # --inference.model.max-model-len for Qwen 7B.
 
-max_steps = 200
+max_steps = 500
 # seq_len 5120 = max prompt (~3072) + completion (2048). Higher (6144/8192) OOMs the
 # 7B trainer when colocated with inference. LAUNCH inference at --gpu-memory-utilization 0.30
 # --model.max-model-len 5120 (0.35 leaves too little; trainer peaks ~74/79 GiB).
 seq_len = 5120
 
+# Periodic checkpoints so a mid-run failure is recoverable AND we have learning-curve
+# snapshots for the post-mortem. interval=25 keeps step_25, 50, 75, ..., 500 if the
+# run completes. keep_last=4 caps disk to ~4 LoRA snapshots (~1.3GB total).
 [ckpt]
+interval = 25
+keep_last = 4
 
 [model]
 name = "Qwen/Qwen2.5-Coder-7B-Instruct"
@@ -48,6 +53,14 @@ group_size = 8
 
 [orchestrator.train.sampling]
 max_completion_tokens = 2048
+
+# enforce=false means the orchestrator only TRACKS zero-advantage rollouts in
+# metrics (no skip, no batch rejection). This prevents the MAX_EMPTY_BATCH_ATTEMPTS
+# crash that ended v0 at step 151/200 — degenerate-reward batches still cost a
+# wasted gradient step, but the run survives them.
+[[orchestrator.filters]]
+type = "zero_advantage"
+enforce = false
 
 [[orchestrator.train.env]]
 id = "dockermin-env"
