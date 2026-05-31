@@ -63,6 +63,10 @@ class EvalEntry:
     test_passes: bool
     elapsed_s: float
     error: str = ""
+    # Persist the model's rewrite so later audits can compare against the original
+    # without re-running inference (e.g. checking reduction % per pass, detecting
+    # echo-the-input reward hacks, regressing reduction-quality across versions).
+    rewrite_dockerfile: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -106,6 +110,7 @@ def _entry(name: str, triple: dict[str, Any], new_df: str, t0: float) -> EvalEnt
         test_passes=passed,
         elapsed_s=time.perf_counter() - t0,
         error=err,
+        rewrite_dockerfile=new_df,
     )
 
 
@@ -144,7 +149,7 @@ def _hf_base() -> tuple[Any, Any]:
     return model, tok
 
 
-def baseline_qwen_zero_shot(triple: dict[str, Any]) -> EvalEntry:
+def baseline_qwen_zero_shot(triple: dict[str, Any], temperature: float = 0.2, max_new_tokens: int = 1024) -> EvalEntry:
     """Base Qwen 2.5 Coder 7B with the standard prompt, no fine-tuning (transformers)."""
     t0 = time.perf_counter()
     try:
@@ -152,7 +157,7 @@ def baseline_qwen_zero_shot(triple: dict[str, Any]) -> EvalEntry:
         model, tok = _hf_base()
         prompt = tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
         enc = tok(prompt, return_tensors="pt").to(model.device)
-        out = model.generate(**enc, max_new_tokens=1024, temperature=0.2, do_sample=True)
+        out = model.generate(**enc, max_new_tokens=max_new_tokens, temperature=temperature, do_sample=True)
         text = tok.decode(out[0][enc.input_ids.shape[1] :], skip_special_tokens=True)
         new_df = extract_dockerfile(text)
         if new_df is None:
@@ -612,7 +617,12 @@ def _hf_dockermin(model_id: str) -> tuple[Any, Any]:
     return model, tok
 
 
-def baseline_dockermin(triple: dict[str, Any], model_id: str = "vtemian/dockermin-qwen7b-lora-v1") -> EvalEntry:
+def baseline_dockermin(
+    triple: dict[str, Any],
+    model_id: str = "vtemian/dockermin-qwen7b-lora-v1",
+    temperature: float = 0.2,
+    max_new_tokens: int = 1024,
+) -> EvalEntry:
     """The fine-tuned dockermin LoRA adapter applied on top of base Qwen."""
     t0 = time.perf_counter()
     try:
@@ -620,7 +630,7 @@ def baseline_dockermin(triple: dict[str, Any], model_id: str = "vtemian/dockermi
         model, tok = _hf_dockermin(model_id)
         prompt = tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
         enc = tok(prompt, return_tensors="pt").to(model.device)
-        out = model.generate(**enc, max_new_tokens=1024, temperature=0.2, do_sample=True)
+        out = model.generate(**enc, max_new_tokens=max_new_tokens, temperature=temperature, do_sample=True)
         text = tok.decode(out[0][enc.input_ids.shape[1] :], skip_special_tokens=True)
         new_df = extract_dockerfile(text)
         if new_df is None:
