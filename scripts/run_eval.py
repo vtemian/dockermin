@@ -83,6 +83,22 @@ def main() -> int:
         default=None,
         help="Optional cap on number of triples (smoke testing).",
     )
+    p.add_argument(
+        "--temperature",
+        type=float,
+        default=0.2,
+        help=(
+            "Sampling temperature for qwen_zs / dockermin (transformers). "
+            "Training samples at ~1.0; matching the train-time distribution may "
+            "raise eval pass rate."
+        ),
+    )
+    p.add_argument(
+        "--max-new-tokens",
+        type=int,
+        default=1024,
+        help="Generation length cap. Training rolled out at 2048; raising here avoids mid-Dockerfile truncation.",
+    )
     args = p.parse_args()
 
     triples = _load_holdout(args.holdout)
@@ -100,6 +116,9 @@ def main() -> int:
                 kwargs: dict = {}
                 if baseline == "dockermin":
                     kwargs["model_id"] = args.dockermin_model
+                if baseline in {"qwen_zs", "dockermin"}:
+                    kwargs["temperature"] = args.temperature
+                    kwargs["max_new_tokens"] = args.max_new_tokens
                 try:
                     entry = run_one(baseline, triple, **kwargs)
                 except Exception as e:  # last-resort: never abort the whole run
