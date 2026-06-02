@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -111,7 +112,15 @@ def main() -> None:
                 continue
             futures.append(ex.submit(process, rec, args.builder, args.cache_dir))
         for fut in as_completed(futures):
-            res = fut.result()
+            # A single candidate's annotation failure (docker daemon read-timeout,
+            # subprocess crash, BLE001-class errors) must not kill the whole run.
+            # Skip the candidate, keep going. Diagnostics for the lost-candidate
+            # case go to stderr so they survive the wider redirect to annotate.log.
+            try:
+                res = fut.result()
+            except Exception as e:
+                print(f"WARN: candidate failed: {type(e).__name__}: {e}", file=sys.stderr)
+                continue
             if res:
                 fout.write(json.dumps(res) + "\n")
                 fout.flush()
