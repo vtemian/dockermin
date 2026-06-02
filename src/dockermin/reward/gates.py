@@ -8,8 +8,20 @@ MIN_COMMANDS = 2
 
 PARSE_FAIL_SCORE = -0.1
 TOO_FEW_COMMANDS_SCORE = -0.2
+# Hallucinated FROM tag — Dockerfile parses, command_count >= MIN_COMMANDS, but
+# at least one FROM references an image that does not resolve in the registry
+# (and isn't cached locally). Scored strictly worse than build_fail's floor so
+# a hallucinated rollout never out-scores a real-tag build attempt; strictly
+# better than parse_fail so the model gets credit for at least emitting a
+# parseable Dockerfile. No command-count credit — padding cannot rescue a
+# hallucinated base.
+MANIFEST_FAIL_SCORE = -0.05
 BUILD_FAIL_SCORE = 0.0
 TEST_FAIL_SCORE = 0.35
+
+# Rung invariant: PARSE_FAIL < TOO_FEW_COMMANDS < MANIFEST_FAIL <
+# max(BUILD_FAIL + cmd credit) < min(TEST_FAIL + cmd credit) < pass floor (0.5).
+# Verified by test_compute_score_manifest_invariant_holds in tests/test_gates.py.
 
 # Smoothing on the failure rungs. The v1 magnitudes (per-cmd=0.005, caps 0.10/0.15)
 # were 4x too small for the actual dataset's command_count distribution: 47% of
@@ -100,6 +112,7 @@ def _tiny_image_penalty(text: str, baseline_size: int, new_size: int) -> float:
 def compute_score(  # noqa: PLR0913 — every gate outcome + size measurement feeds the reward; collapsing them would hide the scoring inputs
     *,
     parse_ok: bool,
+    manifest_ok: bool,
     build_ok: bool,
     test_ok: bool,
     command_count: int,
@@ -120,6 +133,7 @@ def compute_score(  # noqa: PLR0913 — every gate outcome + size measurement fe
     gate_failures = (
         (not parse_ok, PARSE_FAIL_SCORE),
         (command_count < MIN_COMMANDS, TOO_FEW_COMMANDS_SCORE),
+        (not manifest_ok, MANIFEST_FAIL_SCORE),
         (not build_ok, BUILD_FAIL_SCORE + bf_credit),
         (not test_ok, TEST_FAIL_SCORE + tf_credit),
     )
