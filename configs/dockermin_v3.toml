@@ -1,0 +1,116 @@
+# configs/dockermin_v3.toml — GRPO v3 (manifest gate + expanded corpus)
+#
+# Plan: docs/plans/2026-06-02-grpo-v3-manifest-gate-and-dataset-expansion.md
+# Hyperparam rationale: Agent 4 of the v3 multi-agent investigation; see plan
+# section "Subagent investigation summary" (point 4).
+#
+# Validate with:
+#   uv run --no-sync rl @ configs/dockermin_v3.toml --dry-run
+#
+# Key deltas vs configs/dockermin_full.toml (v2):
+#   - max_steps: 250 -> 500
+#       Prime-rl precedent for hard tasks (math, search) runs 500 steps.
+#       Eval grid aligned at steps 100, 200, 300, 400, 500.
+#   - [orchestrator] batch_size: 16 -> 32
+#       Prime-rl reference configs run at 256-512; 32 is a measured v2-stretch
+#       budget that cuts advantage-estimate variance without doubling wall time.
+#   - [orchestrator] group_size: 16 -> 16 (UNCHANGED)
+#       No prime-rl precedent for group_size=32 on a 7B + LoRA — Agent 4.
+#   - [ckpt] interval: 25 -> 50
+#       Eval grid is 100/200/300/400/500 — 50 is the natural divisor.
+#   - [ckpt] keep_last: 4 -> 6
+#       5 eval points + 1 headroom slot.
+#   - [trainer.dataset] id = "vtemian/dockermin-v1"
+#       The expanded ~1000-row corpus from Task 8 (vs v2's vtemian/dockermin-v0).
+#   - [trainer.wandb] / [orchestrator.wandb] offline = true
+#       Same defense as v2's install.sh patch: top-level [wandb].offline is
+#       rejected by `rl`, so the per-process blocks carry it directly.
+#       Bakes the install.sh patch end-state into the repo.
+#   - KL / beta: UNCHANGED. Agent 4 found no evidence for tuning either.
+#
+# On 8xH100 this uses the DEFAULT split deployment (inference on some GPUs,
+# trainer on others via `rl` with --inference-gpu-ids / --trainer-gpu-ids) — no
+# single-GPU colocation hacks — but STILL needs VLLM_USE_DEEP_GEMM=0 and a capped
+# --inference.model.max-model-len for Qwen 7B.
+
+max_steps = 500
+# seq_len 5120 = max prompt (~3072) + completion (2048). Higher (6144/8192) OOMs the
+# 7B trainer when colocated with inference. LAUNCH inference at --gpu-memory-utilization 0.30
+# --model.max-model-len 5120 (0.35 leaves too little; trainer peaks ~74/79 GiB).
+# v1.1 batch tuning (2026-05-28): batch_size 8->16, group_size 8->16, max_steps 500->250.
+# Rationale: 64 rollouts/step (v1) is 32x below the smallest published GRPO success per
+# the multi-agent audit; bumping to 256 rollouts/step drops P(fully-degenerate group)
+# from ~50% to <1%. Per-step wall-time is ~4x; halving max_steps keeps total compute equal.
+seq_len = 5120
+
+# Periodic checkpoints so a mid-run failure is recoverable AND we have learning-curve
+# snapshots for the eval grid (steps 100, 200, 300, 400, 500). keep_last=6 caps disk
+# to ~6 LoRA snapshots (~2GB total): 5 eval points + 1 headroom slot.
+[ckpt]
+interval = 50
+keep_last = 6
+
+[model]
+name = "Qwen/Qwen2.5-Coder-7B-Instruct"
+
+[trainer.model]
+impl = "auto"
+
+[trainer.model.ac]
+freq = 1
+
+[trainer.model.lora]
+rank = 32
+alpha = 64
+
+[trainer.optim]
+lr = 5e-6
+
+[trainer.weight_broadcast]
+type = "filesystem"
+
+# v3 corpus: ~1000 rows with broader FROM-base diversity (rust, go, ruby,
+# dotnet, distroless, chainguard) and a FROZEN holdout (37 rows, identical
+# ids to dockermin-v0/test). See docs/plans/2026-06-02-grpo-v3-* Task 8.
+[trainer.dataset]
+id = "vtemian/dockermin-v1"
+
+# top-level [wandb].offline is rejected by `rl`; carry offline=true on each
+# per-process block. Mirrors the scripts/pod_ops/install.sh patch end-state.
+[trainer.wandb]
+project = "dockermin"
+name = "v3-manifest-and-dataset"
+offline = true
+
+[orchestrator]
+batch_size = 32
+group_size = 16
+
+[orchestrator.wandb]
+project = "dockermin"
+name = "v3-manifest-and-dataset"
+offline = true
+
+[orchestrator.train.sampling]
+max_completion_tokens = 2048
+
+# enforce=false means the orchestrator only TRACKS zero-advantage rollouts in
+# metrics (no skip, no batch rejection). This prevents the MAX_EMPTY_BATCH_ATTEMPTS
+# crash that ended v0 at step 151/200 — degenerate-reward batches still cost a
+# wasted gradient step, but the run survives them. The new manifest rung can
+# starve advantage on hallucination-heavy groups, so we keep this off in v3.
+[[orchestrator.filters]]
+type = "zero_advantage"
+enforce = false
+
+[[orchestrator.train.env]]
+id = "dockermin-env"
+name = "dockermin-env"
+args = {}
+
+[inference] # defaults; max-model-len capped at launch (see pilot header)
+
+# Qwen2.5-Coder-7B is not in prime-rl MODEL_RENDERER_MAP; use the default
+# renderer (applies the tokenizer chat template). No tools -> no tool_parser.
+[orchestrator.renderer]
+name = "default"
