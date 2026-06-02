@@ -78,6 +78,14 @@ def main() -> int:
         help="HF model id for the dockermin LoRA baseline.",
     )
     p.add_argument(
+        "--dockermin-subfolder",
+        default=None,
+        help=(
+            "Subfolder within --dockermin-model that contains adapter_model.safetensors. "
+            "Used to eval per-step checkpoints stored as step_N/ subfolders (e.g. step_250)."
+        ),
+    )
+    p.add_argument(
         "--limit",
         type=int,
         default=None,
@@ -116,6 +124,8 @@ def main() -> int:
                 kwargs: dict = {}
                 if baseline == "dockermin":
                     kwargs["model_id"] = args.dockermin_model
+                    if args.dockermin_subfolder:
+                        kwargs["subfolder"] = args.dockermin_subfolder
                 if baseline in {"qwen_zs", "dockermin"}:
                     kwargs["temperature"] = args.temperature
                     kwargs["max_new_tokens"] = args.max_new_tokens
