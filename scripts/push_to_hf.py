@@ -29,7 +29,9 @@ def _require_token() -> None:
 
 
 def _load_holdout_ids() -> set[str]:
-    return {line for line in HOLDOUT_FIXTURE.read_text().splitlines() if line.strip()}
+    # Strip each line: trailing whitespace from the fixture would silently mis-partition
+    # rows whose id has no whitespace (cubic flagged this on PR #9).
+    return {line.strip() for line in HOLDOUT_FIXTURE.read_text().splitlines() if line.strip()}
 
 
 def main() -> None:

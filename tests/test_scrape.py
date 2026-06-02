@@ -353,7 +353,13 @@ def test_is_new_content_distinct_text_is_new() -> None:
 
 
 def test_install_pattern_queries_cover_new_ecosystems() -> None:
-    """v3 must query for rust/ruby/go/dotnet bases to expand FROM diversity."""
+    """v3 must query for rust/ruby/go bases to expand FROM diversity.
+
+    Dotnet was originally on this list but removed in fix/v3-cubic-review-followups:
+    without a `dotnet` ecosystem entry in _INSTALLER_SIGNALS and a `_dotnet_probe` in
+    annotate.py, the query yields zero usable rows (cubic finding on PR #11). Restore
+    the assertion when dotnet support lands in v4.
+    """
     from dockermin.dataset.scrape import _INSTALL_PATTERN_QUERIES
 
     queries = set(_INSTALL_PATTERN_QUERIES)
@@ -361,7 +367,6 @@ def test_install_pattern_queries_cover_new_ecosystems() -> None:
         "cargo language:Dockerfile filename:Dockerfile size:<2500",
         '"bundle install" language:Dockerfile filename:Dockerfile size:<2500',
         '"go mod" language:Dockerfile filename:Dockerfile size:<2500',
-        '"dotnet restore" language:Dockerfile filename:Dockerfile size:<2500',
     }
     missing = must_have - queries
     assert not missing, f"v3 must query: {sorted(missing)}"
