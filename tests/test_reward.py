@@ -96,6 +96,7 @@ def test_build_fail_partial_credit_scales_with_command_count() -> None:
     so GRPO groups with mixed-complexity build failures have non-zero reward variance."""
     small = compute_score(
         parse_ok=True,
+        manifest_ok=True,
         build_ok=False,
         test_ok=False,
         command_count=5,
@@ -105,6 +106,7 @@ def test_build_fail_partial_credit_scales_with_command_count() -> None:
     )
     big = compute_score(
         parse_ok=True,
+        manifest_ok=True,
         build_ok=False,
         test_ok=False,
         command_count=20,
@@ -122,6 +124,7 @@ def test_build_fail_partial_credit_saturates_at_cap() -> None:
     a degenerate verbose Dockerfile could out-reward a buildable one."""
     huge = compute_score(
         parse_ok=True,
+        manifest_ok=True,
         build_ok=False,
         test_ok=False,
         command_count=200,
@@ -137,6 +140,7 @@ def test_test_fail_partial_credit_separates_from_build_fail() -> None:
     same command count — preserves the gate order even with smoothing."""
     bf = compute_score(
         parse_ok=True,
+        manifest_ok=True,
         build_ok=False,
         test_ok=False,
         command_count=10,
@@ -146,6 +150,7 @@ def test_test_fail_partial_credit_separates_from_build_fail() -> None:
     )
     tf = compute_score(
         parse_ok=True,
+        manifest_ok=True,
         build_ok=True,
         test_ok=False,
         command_count=10,
@@ -160,6 +165,7 @@ def test_full_pass_unchanged_by_smoothing() -> None:
     """The pass-rung formula (0.5 + 0.5*dense + shape) must not be touched."""
     s = compute_score(
         parse_ok=True,
+        manifest_ok=True,
         build_ok=True,
         test_ok=True,
         command_count=5,
@@ -176,6 +182,7 @@ def test_parse_fail_unchanged() -> None:
     command_count to credit)."""
     s = compute_score(
         parse_ok=False,
+        manifest_ok=True,
         build_ok=False,
         test_ok=False,
         command_count=0,
@@ -191,6 +198,7 @@ def test_partial_credit_caps_at_baseline_plus_two_when_baseline_provided() -> No
     as a 7-cmd build-fail (baseline+2), preventing reward gaming via no-op LABELs."""
     padded = compute_score(
         parse_ok=True,
+        manifest_ok=True,
         build_ok=False,
         test_ok=False,
         command_count=100,
@@ -201,6 +209,7 @@ def test_partial_credit_caps_at_baseline_plus_two_when_baseline_provided() -> No
     )
     capped = compute_score(
         parse_ok=True,
+        manifest_ok=True,
         build_ok=False,
         test_ok=False,
         command_count=7,
@@ -217,6 +226,7 @@ def test_partial_credit_unchanged_when_baseline_not_provided() -> None:
     (uncapped per-cmd credit, capped only at BUILD_FAIL_CMD_CREDIT_MAX)."""
     score = compute_score(
         parse_ok=True,
+        manifest_ok=True,
         build_ok=False,
         test_ok=False,
         command_count=100,
@@ -238,6 +248,7 @@ def test_rung_order_preserved_at_caps() -> None:
 
     max_bf = compute_score(
         parse_ok=True,
+        manifest_ok=True,
         build_ok=False,
         test_ok=False,
         command_count=200,
@@ -247,6 +258,7 @@ def test_rung_order_preserved_at_caps() -> None:
     )
     min_tf = compute_score(
         parse_ok=True,
+        manifest_ok=True,
         build_ok=True,
         test_ok=False,
         command_count=MIN_COMMANDS,

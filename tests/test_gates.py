@@ -4,12 +4,21 @@ from __future__ import annotations
 
 import pytest
 
-from dockermin.reward.gates import compute_score
+from dockermin.reward.gates import (
+    BUILD_FAIL_CMD_CREDIT_MAX,
+    BUILD_FAIL_SCORE,
+    MANIFEST_FAIL_SCORE,
+    PARSE_FAIL_SCORE,
+    TEST_FAIL_CMD_CREDIT_MAX,
+    TEST_FAIL_SCORE,
+    compute_score,
+)
 
 
 def test_compute_score_parse_fail_returns_minus_point_1() -> None:
     s = compute_score(
         parse_ok=False,
+        manifest_ok=True,
         build_ok=False,
         test_ok=False,
         command_count=0,
@@ -23,6 +32,7 @@ def test_compute_score_parse_fail_returns_minus_point_1() -> None:
 def test_compute_score_too_few_commands_returns_minus_point_2() -> None:
     s = compute_score(
         parse_ok=True,
+        manifest_ok=True,
         build_ok=False,
         test_ok=False,
         command_count=1,
@@ -36,6 +46,7 @@ def test_compute_score_too_few_commands_returns_minus_point_2() -> None:
 def test_compute_score_build_fail_returns_smoothed_credit() -> None:
     s = compute_score(
         parse_ok=True,
+        manifest_ok=True,
         build_ok=False,
         test_ok=False,
         command_count=3,
@@ -49,6 +60,7 @@ def test_compute_score_build_fail_returns_smoothed_credit() -> None:
 def test_compute_score_test_fail_returns_smoothed_credit() -> None:
     s = compute_score(
         parse_ok=True,
+        manifest_ok=True,
         build_ok=True,
         test_ok=False,
         command_count=3,
@@ -62,6 +74,7 @@ def test_compute_score_test_fail_returns_smoothed_credit() -> None:
 def test_compute_score_test_pass_full_reduction_returns_around_one() -> None:
     s = compute_score(
         parse_ok=True,
+        manifest_ok=True,
         build_ok=True,
         test_ok=True,
         command_count=3,
@@ -76,6 +89,7 @@ def test_shape_bonus_gated_on_test_pass() -> None:
     # Build passes but test fails: NO shape bonus from alpine string
     s = compute_score(
         parse_ok=True,
+        manifest_ok=True,
         build_ok=True,
         test_ok=False,
         command_count=3,
@@ -94,10 +108,18 @@ def test_from_scratch_with_leading_copy_no_penalty() -> None:
     # "from scratch with no COPY" penalty was wrongly applied.
     df = 'FROM scratch\nCOPY app /app\nCMD ["/app"]'
     s_with_copy = compute_score(
-        parse_ok=True, build_ok=True, test_ok=True, command_count=3, baseline_size=100, new_size=80, dockerfile_text=df
+        parse_ok=True,
+        manifest_ok=True,
+        build_ok=True,
+        test_ok=True,
+        command_count=3,
+        baseline_size=100,
+        new_size=80,
+        dockerfile_text=df,
     )
     s_no_copy = compute_score(
         parse_ok=True,
+        manifest_ok=True,
         build_ok=True,
         test_ok=True,
         command_count=3,
@@ -116,6 +138,7 @@ def test_from_scratch_echo_cheat_scores_low() -> None:
     honest shrink, even if it somehow passed the test gate."""
     cheat = compute_score(
         parse_ok=True,
+        manifest_ok=True,
         build_ok=True,
         test_ok=True,
         command_count=2,
@@ -125,6 +148,7 @@ def test_from_scratch_echo_cheat_scores_low() -> None:
     )
     honest = compute_score(
         parse_ok=True,
+        manifest_ok=True,
         build_ok=True,
         test_ok=True,
         command_count=4,
@@ -140,6 +164,7 @@ def test_suspiciously_tiny_image_soft_penalised() -> None:
     soft penalty, not a hard reject (legit static distroless binaries exist)."""
     s = compute_score(
         parse_ok=True,
+        manifest_ok=True,
         build_ok=True,
         test_ok=True,
         command_count=2,
@@ -149,6 +174,7 @@ def test_suspiciously_tiny_image_soft_penalised() -> None:
     )
     s_legit = compute_score(
         parse_ok=True,
+        manifest_ok=True,
         build_ok=True,
         test_ok=True,
         command_count=3,
@@ -162,6 +188,7 @@ def test_suspiciously_tiny_image_soft_penalised() -> None:
 def test_latest_tag_penalty_applied_when_test_passes() -> None:
     s_with = compute_score(
         parse_ok=True,
+        manifest_ok=True,
         build_ok=True,
         test_ok=True,
         command_count=3,
@@ -171,6 +198,7 @@ def test_latest_tag_penalty_applied_when_test_passes() -> None:
     )
     s_without = compute_score(
         parse_ok=True,
+        manifest_ok=True,
         build_ok=True,
         test_ok=True,
         command_count=3,
@@ -179,3 +207,29 @@ def test_latest_tag_penalty_applied_when_test_passes() -> None:
         dockerfile_text='FROM python:3.12-slim\nCMD ["x"]',
     )
     assert s_without > s_with
+
+
+def test_compute_score_manifest_fail_returns_minus_005() -> None:
+    """Hallucinated FROM tag (manifest_ok=False) scores MANIFEST_FAIL_SCORE,
+    strictly between PARSE_FAIL and BUILD_FAIL with no command-count credit."""
+    score = compute_score(
+        parse_ok=True,
+        manifest_ok=False,
+        build_ok=False,
+        test_ok=False,
+        command_count=10,
+        baseline_size=1_000_000,
+        new_size=500_000,
+        dockerfile_text="FROM hallucinated:tag\nRUN echo hi",
+        baseline_command_count=8,
+    )
+    assert score == MANIFEST_FAIL_SCORE
+    assert MANIFEST_FAIL_SCORE == -0.05  # contract — bump on purpose only
+
+
+def test_compute_score_manifest_invariant_holds() -> None:
+    """max(manifest_fail) < min(build_fail with no credit) < min(test_fail) < pass floor."""
+    assert MANIFEST_FAIL_SCORE < BUILD_FAIL_SCORE
+    assert MANIFEST_FAIL_SCORE > PARSE_FAIL_SCORE  # manifest_fail is "more progress" than parse_fail
+    assert BUILD_FAIL_SCORE + BUILD_FAIL_CMD_CREDIT_MAX < TEST_FAIL_SCORE
+    assert TEST_FAIL_SCORE + TEST_FAIL_CMD_CREDIT_MAX < 0.5  # pass floor

@@ -92,6 +92,7 @@ async def dockermin_reward(  # noqa: PLR0911, PLR0915 — each return is a disti
     if not p.ok:
         return compute_score(
             parse_ok=False,
+            manifest_ok=True,
             build_ok=False,
             test_ok=False,
             command_count=0,
@@ -106,6 +107,7 @@ async def dockermin_reward(  # noqa: PLR0911, PLR0915 — each return is a disti
             if not b.ok:
                 return compute_score(
                     parse_ok=True,
+                    manifest_ok=True,
                     build_ok=False,
                     test_ok=False,
                     command_count=p.command_count,
@@ -118,6 +120,7 @@ async def dockermin_reward(  # noqa: PLR0911, PLR0915 — each return is a disti
         except Exception:  # noqa: BLE001 - docker hiccup -> score as build failure, never crash the loop
             return compute_score(
                 parse_ok=True,
+                manifest_ok=True,
                 build_ok=False,
                 test_ok=False,
                 command_count=p.command_count,
@@ -128,6 +131,7 @@ async def dockermin_reward(  # noqa: PLR0911, PLR0915 — each return is a disti
             )
     return compute_score(
         parse_ok=True,
+        manifest_ok=True,
         build_ok=True,
         test_ok=t.ok,
         command_count=p.command_count,
