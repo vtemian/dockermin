@@ -365,3 +365,16 @@ def test_install_pattern_queries_cover_new_ecosystems() -> None:
     }
     missing = must_have - queries
     assert not missing, f"v3 must query: {sorted(missing)}"
+
+
+# --- fetch_chainguard_images --------------------------------------------------
+
+
+def test_fetch_chainguard_images_is_callable() -> None:
+    """Smoke: chainguard fetcher exists and accepts a limit kwarg."""
+    import inspect
+
+    from dockermin.dataset.scrape import fetch_chainguard_images
+
+    sig = inspect.signature(fetch_chainguard_images)
+    assert "limit" in sig.parameters

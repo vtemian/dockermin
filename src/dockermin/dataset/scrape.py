@@ -396,6 +396,115 @@ def fetch_awesome_compose(limit: int = 50) -> Iterable[Candidate]:
     yield from itertools.islice(_all(), limit)
 
 
+_CHAINGUARD_REPO = "chainguard-images/images"
+
+
+def _list_github_dir(repo: str, path: str) -> list[dict[str, Any]] | None:
+    """List the contents of ``repos/{repo}/contents/{path}`` or None on failure."""
+    try:
+        children = _gh_api(f"repos/{repo}/contents/{path}")
+    except subprocess.CalledProcessError as exc:
+        logger.debug("github dir listing failed for %s/%s: %s", repo, path, exc)
+        return None
+    return children if isinstance(children, list) else None
+
+
+def _walk_chainguard_child(repo: str, child: dict[str, Any], max_depth: int) -> Iterable[str]:
+    """Yield file paths for one chainguard tree entry (file or subdir to recurse)."""
+    ctype = child.get("type")
+    path = child.get("path")
+    if not path:
+        return
+    if ctype == "file":
+        yield path
+        return
+    if ctype != "dir" or max_depth <= 0:
+        return
+    sub_children = _list_github_dir(repo, path)
+    if sub_children is not None:
+        yield from _walk_chainguard_dir(repo, path, max_depth=max_depth - 1)
+
+
+def _walk_chainguard_dir(repo: str, root: str, max_depth: int) -> Iterable[str]:
+    """Yield file paths from ``repo`` under ``root`` via the GitHub contents API.
+
+    Mirrors the awesome-compose walker but yields raw paths so the caller can
+    filter by filename (Dockerfile / *.Dockerfile) before fetching content.
+    """
+    children = _list_github_dir(repo, root)
+    if children is None:
+        return
+    for child in children:
+        yield from _walk_chainguard_child(repo, child, max_depth)
+
+
+def _github_file_download_url(repo: str, path: str) -> str | None:
+    """Resolve the raw download URL for a file path inside ``repo``."""
+    try:
+        meta = _gh_api(f"repos/{repo}/contents/{path}")
+    except subprocess.CalledProcessError as exc:
+        logger.debug("github file meta failed for %s/%s: %s", repo, path, exc)
+        return None
+    if not isinstance(meta, dict):
+        return None
+    return meta.get("download_url") or None
+
+
+def _candidate_from_github_path(repo: str, path: str, license_name: str | None) -> Candidate | None:
+    """Resolve a file path inside ``repo`` to a Candidate via the contents API."""
+    download_url = _github_file_download_url(repo, path)
+    if not download_url:
+        return None
+    dockerfile_text = _fetch_dockerfile(download_url, f"{repo}/{path}")
+    if dockerfile_text is None:
+        return None
+    return Candidate(
+        source=f"{repo}:{path}",
+        url=download_url,
+        dockerfile=dockerfile_text,
+        ecosystem=_ecosystem_from_dockerfile(dockerfile_text),
+        license=license_name,
+    )
+
+
+def _is_dockerfile_path(path: str) -> bool:
+    """Match awesome-compose's `Dockerfile` and `*.Dockerfile` filename convention."""
+    return path.endswith(("/Dockerfile", ".Dockerfile"))
+
+
+def _chainguard_candidate(path: str, seen_hashes: set[str]) -> Candidate | None:
+    """Probe one chainguard file path and return a Candidate if it survives the filters."""
+    candidate = _candidate_from_github_path(_CHAINGUARD_REPO, path, license_name="Apache-2.0")
+    if candidate is None:
+        return None
+    if not _is_self_contained_probeable(candidate.dockerfile):
+        return None
+    if not _is_new_content(candidate.dockerfile, seen_hashes):
+        return None
+    return candidate
+
+
+def fetch_chainguard_images(limit: int = 50) -> Iterable[Candidate]:
+    """Walk chainguard-images/images on GitHub for Wolfi-derived Dockerfiles.
+
+    Chainguard images use ``apk`` (Wolfi/Alpine) instead of apt — entirely
+    unrepresented in dockermin-v0. Yields candidates the same shape as
+    ``fetch_awesome_compose``. License: Apache-2.0 per the repo.
+    """
+    seen_hashes: set[str] = set()
+    yielded = 0
+    for path in _walk_chainguard_dir(_CHAINGUARD_REPO, "images", max_depth=2):
+        if yielded >= limit:
+            return
+        if not _is_dockerfile_path(path):
+            continue
+        candidate = _chainguard_candidate(path, seen_hashes)
+        if candidate is None:
+            continue
+        yield candidate
+        yielded += 1
+
+
 def _search_code_page(query: str, page: int) -> list[dict[str, Any]]:
     """Fetch one page of GitHub code-search results, returning [] on failure or end."""
     cmd = [
