@@ -1,5 +1,6 @@
 """Smoke: the v3 config exists, is valid TOML, and encodes the hyperparam choices
 from docs/plans/2026-06-02-grpo-v3-manifest-gate-and-dataset-expansion.md."""
+
 from __future__ import annotations
 
 import tomllib
