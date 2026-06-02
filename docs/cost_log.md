@@ -20,6 +20,11 @@ Tracks compute spend against the $400 cap. Append per session, do not edit prior
 | 2026-05-28 | GRPO v1.1 retry 2 (DEAD @ step ~234) | lambdalabs | 1xH100 80GB | 2026-05-28T16:10:00Z | 2026-05-28T20:39:00Z | 4.48 | $4.29 | $19.22 | platform went UNKNOWN, no adapter pushed |
 | 2026-05-29 | GRPO v1.1 retry 3 massedcompute (DEAD @ step ~130 post-resume) | massedcompute | 1xA100 80GB SXM4 | 2026-05-29T07:36:08Z | 2026-05-29T13:00:00Z | 5.40 | $1.79 | $9.66 | disk full from docker accumulation; resumed step 125→129 then UNKNOWN |
 | 2026-05-29 | GRPO v1.1 retry 4 (COMPLETED step 250) | massedcompute | 1xA100 80GB PCIe | 2026-05-29T14:48:05Z | 2026-05-30T08:50:00Z | 18.03 | $1.79 | $32.27 | adapter step_250 pushed to HF; manual terminate (watcher missed trigger - trainer logged Step 249 only) |
+| 2026-05-30 | Eval pod (qwen_zs partial, DEAD) | massedcompute | 1xA100 80GB | 2026-05-30T08:53:36Z | 2026-05-30T09:38:00Z | 0.74 | $1.79 | $1.34 | died UNKNOWN before dockermin baseline ran |
+| 2026-05-30 | Eval pod (qwen_zs at H200, DEAD) | nebius | 1xH200 141GB | 2026-05-30T17:25:13Z | 2026-05-30T19:25:00Z | 2.00 | $2.00 | $4.00 | qwen_zs ran to 36/37 then 2h watchdog terminated |
+| 2026-05-31 | Eval pod (dockermin v2 step_250) | crusoe | 1xA100 80GB | 2026-05-31T08:43:54Z | 2026-05-31T11:00:00Z | 2.27 | $1.79 | $4.06 | dockermin v2 step_250 = 21/37 pass (56.8%); successful |
+| 2026-05-31 | Eval pod (step_100+step_250 @ T=1.0) | massedcompute | 1xA100 80GB | 2026-05-31T14:55:00Z | 2026-05-31T17:25:00Z | 2.50 | $1.79 | $4.48 | both T=1.0 runs completed before pod died UNKNOWN; results pushed via 60s loop |
+| 2026-06-01 | Eval pod (step_100 @ T=0.2) | massedcompute | 1xA100 80GB | 2026-06-01T19:05:30Z | 2026-06-01T20:15:00Z | 1.16 | $1.79 | $2.08 | step_100 @ T=0.2 = 20/37 pass (54.1%); 37 rows pushed before pod died UNKNOWN |
 
 **Eval note (2026-05-27):** eval pod fully set up (prime-rl/vllm/transformers/peft + dockermin +
 hadolint + slim + DooD + OpenAI key) then TERMINATED without running the eval — Vlad left and an
