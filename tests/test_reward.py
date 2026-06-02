@@ -237,6 +237,38 @@ def test_partial_credit_unchanged_when_baseline_not_provided() -> None:
     assert score == pytest.approx(BUILD_FAIL_SCORE + BUILD_FAIL_CMD_CREDIT_MAX)  # 0.30
 
 
+def test_reward_threads_manifest_ok_through_every_branch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every compute_score call inside dockermin_reward must pass manifest_ok.
+
+    compute_score's manifest_ok parameter is keyword-only and required: a missing
+    arg raises TypeError, which verifiers would silently coerce to 0.0 and pollute
+    the gradient. This smoke test exercises the parse-fail, build-fail, and
+    full-pipeline-pass branches and asserts each returns a float (i.e. did not
+    TypeError on the compute_score call).
+    """
+    fake_df = 'FROM python:3.12-slim\nCMD ["true"]\n'
+    completion = [{"role": "assistant", "content": f"```dockerfile\n{fake_df}\n```"}]
+    info = {
+        "baseline_size": 50_000_000,
+        "test_cmd": ["true"],
+        "expected_substring": "",
+        "baseline_command_count": 3,
+    }
+
+    monkeypatch.setattr(dr_mod, "parse_gate", lambda _df: ParseResult(ok=False, error="x"))
+    assert isinstance(asyncio.run(dockermin_reward(completion=completion, info=info)), float)
+
+    monkeypatch.setattr(dr_mod, "parse_gate", lambda _df: ParseResult(ok=True, command_count=3))
+    monkeypatch.setattr(dr_mod, "build_gate", lambda _df, timeout_s=300: BuildResult(ok=False, error="rc=1"))
+    assert isinstance(asyncio.run(dockermin_reward(completion=completion, info=info)), float)
+
+    monkeypatch.setattr(dr_mod, "build_gate", lambda _df, timeout_s=300: BuildResult(ok=True, tag="t", size_bytes=80))
+    monkeypatch.setattr(
+        dr_mod, "run_test_gate", lambda _tag, _cmd, _expected, timeout_s=30: TestResult(ok=True, output="ok")
+    )
+    assert isinstance(asyncio.run(dockermin_reward(completion=completion, info=info)), float)
+
+
 def test_rung_order_preserved_at_caps() -> None:
     """Max build_fail must remain strictly less than min test_fail (gate ordering).
 
