@@ -21,11 +21,12 @@ logger = logging.getLogger(__name__)
 # Small pause between gh calls to keep us under secondary rate limits.
 GH_SLEEP_S = 0.5
 RAW_SLEEP_S = 0.1
-# GitHub's search/code API is throttled at 30 requests/min for authenticated
-# users — far stricter than core API (5000/h). Each install-pattern query
-# fetches up to 10 pages; 4 queries * 10 = 40 calls within 1 minute would
-# blow the limit. 2.5s between search pages keeps us at <= 24 calls/min.
-SEARCH_SLEEP_S = 2.5
+# GitHub's `code_search` endpoint (used by /search/code) is the strictest
+# rate bucket — 10 requests/minute per user, separate from the 30/min legacy
+# `search` bucket and the 5000/h `core` bucket. We sleep 7s between pages so
+# the burst rate stays under the 10/min cap with comfortable headroom.
+# A 9-query x 10-page scrape now takes ~10.5 minutes by design.
+SEARCH_SLEEP_S = 7.0
 
 # GitHub search returns at most this many items per page.
 _SEARCH_PAGE_SIZE = 100
