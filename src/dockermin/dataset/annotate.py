@@ -170,6 +170,75 @@ def _run_buildx(df_text: str, tag: str, timeout_s: int, builder: str | None, cac
     return None
 
 
+def _image_exists_locally(image_ref: str, timeout_s: int = 5) -> bool:
+    """Cheap probe: is this image already present in the local Docker image store?
+
+    If yes, ``docker build`` will succeed regardless of registry state.
+    """
+    try:
+        # Fixed `docker` argv (no shell); the binary is the project's pinned tooling.
+        proc = subprocess.run(  # noqa: S603
+            ["docker", "image", "inspect", image_ref],  # noqa: S607
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return False
+    return proc.returncode == 0
+
+
+def _manifest_exists_in_registry(image_ref: str, timeout_s: int = 15) -> bool:
+    """Probe the registry for the manifest of ``image_ref``.
+
+    Returns True if the tag resolves (returncode 0), False on a clean
+    "not found", and True on any timeout (defensive: a network blip must
+    not penalize the model).
+    """
+    try:
+        # Fixed `docker` argv (no shell); the binary is the project's pinned tooling.
+        proc = subprocess.run(  # noqa: S603
+            ["docker", "manifest", "inspect", image_ref],  # noqa: S607
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        # Pass-on-timeout — same defensive posture as the BLE001 safety net in
+        # dockermin_reward.py. A network blip must not penalize the model.
+        return True
+    return proc.returncode == 0
+
+
+def _resolves(image_ref: str, timeout_s: int) -> bool:
+    """True if ``image_ref`` is locally cached or its manifest is in the registry."""
+    return _image_exists_locally(image_ref) or _manifest_exists_in_registry(image_ref, timeout_s=timeout_s)
+
+
+def manifest_gate(df_text: str, timeout_s: int = 15) -> ManifestResult:
+    """Check every unique FROM image resolves either locally or in the registry.
+
+    Probe order per image: local image-inspect for cache hit, then registry
+    manifest-inspect for tag resolution. Pass if either succeeds. ``FROM scratch``
+    and stage aliases are filtered upstream by ``find_from_images``.
+
+    Returns ``ManifestResult(ok=False)`` with the offending refs in ``missing``
+    when any FROM cannot be resolved.
+    """
+    images = find_from_images(df_text)
+    if not images:
+        # No registry images to probe — multi-stage scratch-only, or parse
+        # failure already handled by parse_gate. Treat as pass; downstream
+        # gates will catch real problems.
+        return ManifestResult(ok=True)
+    missing = tuple(image for image in images if not _resolves(image, timeout_s))
+    if missing:
+        return ManifestResult(ok=False, missing=missing, error=f"manifest not found: {', '.join(missing)}")
+    return ManifestResult(ok=True)
+
+
 def build_gate(
     df_text: str, timeout_s: int = 300, builder: str | None = None, cache_dir: str | None = None
 ) -> BuildResult:

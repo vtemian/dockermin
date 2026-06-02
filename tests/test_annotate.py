@@ -15,6 +15,7 @@ from dockermin.dataset.annotate import (
     build_gate,
     find_from_images,
     infer_test_cmd,
+    manifest_gate,
     parse_gate,
     run_test_gate,
 )
@@ -268,3 +269,45 @@ def test_manifest_result_is_frozen_dataclass() -> None:
     assert result.error == "not found"
     with pytest.raises((AttributeError, Exception)):  # frozen dataclass disallows mutation
         result.ok = True  # type: ignore[misc]
+
+
+def test_manifest_gate_scratch_only_passes_without_probing() -> None:
+    """Multi-stage scratch-only Dockerfile has nothing to probe; gate must pass
+    so the build_gate (not the manifest_gate) decides the outcome."""
+    result = manifest_gate('FROM scratch\nCOPY app /app\nENTRYPOINT ["/app"]\n')
+    assert result.ok is True
+    assert result.missing == ()
+
+
+@pytest.mark.docker
+@pytest.mark.skipif(not DOCKER_AVAILABLE, reason="docker daemon not available")
+def test_manifest_gate_real_tag_passes() -> None:
+    """python:3.12-slim resolves in Docker Hub — manifest_gate returns ok=True."""
+    result = manifest_gate('FROM python:3.12-slim\nRUN echo hi\nCMD ["python"]')
+    assert result.ok is True
+    assert result.missing == ()
+
+
+@pytest.mark.docker
+@pytest.mark.skipif(not DOCKER_AVAILABLE, reason="docker daemon not available")
+def test_manifest_gate_hallucinated_tag_fails() -> None:
+    """A non-existent tag in a real Docker Hub namespace must fail the gate.
+
+    eclipse-temurin:9999-nonexistent-dockermin-test is namespaced under the real
+    eclipse-temurin library but at a tag the registry will not serve — this
+    matches the v2 failure mode of hallucinated tags like
+    eclipse-temurin:25-jdk-slim that look plausible but do not resolve.
+    """
+    bogus = "eclipse-temurin:9999-nonexistent-dockermin-test"
+    result = manifest_gate(f'FROM {bogus}\nRUN echo hi\nCMD ["java"]')
+    assert result.ok is False
+    assert bogus in result.missing
+
+
+@pytest.mark.docker
+@pytest.mark.skipif(not DOCKER_AVAILABLE, reason="docker daemon not available")
+def test_manifest_gate_multistage_one_hallucinated_fails() -> None:
+    df = 'FROM python:3.12-slim AS builder\nFROM does-not-exist-dockermin-test:fake-tag\nRUN echo hi\nCMD ["python"]\n'
+    result = manifest_gate(df)
+    assert result.ok is False
+    assert "does-not-exist-dockermin-test:fake-tag" in result.missing

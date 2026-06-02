@@ -6,13 +6,14 @@ import asyncio
 
 import pytest
 
-from dockermin.dataset.annotate import BuildResult, ParseResult, TestResult
+from dockermin.dataset.annotate import BuildResult, ManifestResult, ParseResult, TestResult
 from dockermin.reward import dockermin_reward as dr_mod
 from dockermin.reward.dockermin_reward import dockermin_reward
 from dockermin.reward.gates import (
     BUILD_FAIL_CMD_CREDIT_MAX,
     BUILD_FAIL_SCORE,
     CMD_CREDIT_PER_CMD,
+    MANIFEST_FAIL_SCORE,
     PARSE_FAIL_SCORE,
     compute_score,
 )
@@ -235,6 +236,50 @@ def test_partial_credit_unchanged_when_baseline_not_provided() -> None:
         dockerfile_text="",
     )
     assert score == pytest.approx(BUILD_FAIL_SCORE + BUILD_FAIL_CMD_CREDIT_MAX)  # 0.30
+
+
+def test_reward_manifest_fail_short_circuits_to_minus_005(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When manifest_gate fails, dockermin_reward must return MANIFEST_FAIL_SCORE
+    without attempting the docker build. Mocks build_gate to a sentinel that
+    raises if invoked, so a regression that runs the build despite a missing
+    manifest would be loud."""
+    fake_df = 'FROM hallucinated:tag\nRUN echo hi\nCMD ["true"]\n'
+    completion = [{"role": "assistant", "content": f"```dockerfile\n{fake_df}\n```"}]
+    info = {"baseline_size": 50_000_000, "test_cmd": ["true"], "expected_substring": "", "baseline_command_count": 3}
+
+    def _build_should_not_run(*_args: object, **_kwargs: object) -> BuildResult:
+        msg = "build_gate must not run when manifest_gate fails"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(dr_mod, "parse_gate", lambda _df: ParseResult(ok=True, command_count=3))
+    monkeypatch.setattr(
+        dr_mod,
+        "manifest_gate",
+        lambda _df, timeout_s=15: ManifestResult(ok=False, missing=("hallucinated:tag",), error="not found"),
+    )
+    monkeypatch.setattr(dr_mod, "build_gate", _build_should_not_run)
+    score = asyncio.run(dockermin_reward(completion=completion, info=info))
+    assert score == pytest.approx(MANIFEST_FAIL_SCORE)
+
+
+def test_reward_manifest_pass_proceeds_to_build(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When manifest_gate passes, the build/test gates decide the outcome.
+
+    Mocks the full happy path and asserts the score matches the pass formula
+    (0.5 + 0.5 * reduction); proves the manifest gate did not short-circuit.
+    """
+    fake_df = 'FROM python:3.12-slim\nCMD ["true"]\n'
+    completion = [{"role": "assistant", "content": f"```dockerfile\n{fake_df}\n```"}]
+    info = {"baseline_size": 100, "test_cmd": ["true"], "expected_substring": ""}
+
+    monkeypatch.setattr(dr_mod, "parse_gate", lambda _df: ParseResult(ok=True, command_count=3))
+    monkeypatch.setattr(dr_mod, "manifest_gate", lambda _df, timeout_s=15: ManifestResult(ok=True))
+    monkeypatch.setattr(dr_mod, "build_gate", lambda _df, timeout_s=300: BuildResult(ok=True, tag="t", size_bytes=80))
+    monkeypatch.setattr(
+        dr_mod, "run_test_gate", lambda _tag, _cmd, _expected, timeout_s=30: TestResult(ok=True, output="ok")
+    )
+    score = asyncio.run(dockermin_reward(completion=completion, info=info))
+    assert score == pytest.approx(0.6, abs=0.001)
 
 
 def test_reward_threads_manifest_ok_through_every_branch(monkeypatch: pytest.MonkeyPatch) -> None:

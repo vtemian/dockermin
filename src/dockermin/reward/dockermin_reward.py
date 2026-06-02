@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from typing import Any
 
-from dockermin.dataset.annotate import build_gate, parse_gate, run_test_gate
+from dockermin.dataset.annotate import build_gate, manifest_gate, parse_gate, run_test_gate
 
 from .gates import compute_score
 from .prompts import extract_dockerfile
+
+logger = logging.getLogger(__name__)
 
 # Verifiers runs every rollout on one event loop; a sync 300s docker build would
 # block all concurrent rollouts. We offload the blocking docker calls to threads
@@ -66,9 +69,63 @@ def _completion_text(completion: str | list[Any]) -> str:
     return ""
 
 
-async def dockermin_reward(  # noqa: PLR0911, PLR0915 — each return is a distinct gate outcome (malformed/parse/build/test); collapsing them would hide the score path
-    completion: str | list[dict[str, Any]], info: dict[str, Any], **_kwargs: object
+async def _score_after_manifest_pass(
+    new_df: str,
+    command_count: int,
+    baseline_size: int,
+    baseline_command_count: int | None,
+    test_cmd: list[str],
+    expected: str,
 ) -> float:
+    """Run build_gate + run_test_gate under the build semaphore and return the score.
+
+    Caller has already verified parse_gate and manifest_gate. Docker hiccups
+    (subprocess exceptions, daemon errors) are scored as build failures rather
+    than raised — verifiers would otherwise swallow them to 0.0 and pollute the
+    gradient.
+    """
+    async with _BUILD_SEM:
+        try:
+            b = await asyncio.to_thread(build_gate, new_df, 300)
+            if not b.ok:
+                return compute_score(
+                    parse_ok=True,
+                    manifest_ok=True,
+                    build_ok=False,
+                    test_ok=False,
+                    command_count=command_count,
+                    baseline_size=baseline_size,
+                    new_size=0,
+                    dockerfile_text=new_df,
+                    baseline_command_count=baseline_command_count,
+                )
+            t = await asyncio.to_thread(run_test_gate, b.tag, test_cmd, expected, 30)
+        except Exception:  # noqa: BLE001 - docker hiccup -> score as build failure, never crash the loop
+            return compute_score(
+                parse_ok=True,
+                manifest_ok=True,
+                build_ok=False,
+                test_ok=False,
+                command_count=command_count,
+                baseline_size=baseline_size,
+                new_size=0,
+                dockerfile_text=new_df,
+                baseline_command_count=baseline_command_count,
+            )
+    return compute_score(
+        parse_ok=True,
+        manifest_ok=True,
+        build_ok=True,
+        test_ok=t.ok,
+        command_count=command_count,
+        baseline_size=baseline_size,
+        new_size=b.size_bytes,
+        dockerfile_text=new_df,
+        baseline_command_count=baseline_command_count,
+    )
+
+
+async def dockermin_reward(completion: str | list[dict[str, Any]], info: dict[str, Any], **_kwargs: object) -> float:
     """Composite reward. Async so the docker build does not block the rollout
     event loop. Signature accepts arbitrary kwargs per verifiers Rubric convention.
 
@@ -101,42 +158,28 @@ async def dockermin_reward(  # noqa: PLR0911, PLR0915 — each return is a disti
             dockerfile_text=new_df,
             baseline_command_count=baseline_command_count,
         )
-    async with _BUILD_SEM:
-        try:
-            b = await asyncio.to_thread(build_gate, new_df, 300)
-            if not b.ok:
-                return compute_score(
-                    parse_ok=True,
-                    manifest_ok=True,
-                    build_ok=False,
-                    test_ok=False,
-                    command_count=p.command_count,
-                    baseline_size=baseline_size,
-                    new_size=0,
-                    dockerfile_text=new_df,
-                    baseline_command_count=baseline_command_count,
-                )
-            t = await asyncio.to_thread(run_test_gate, b.tag, test_cmd, expected, 30)
-        except Exception:  # noqa: BLE001 - docker hiccup -> score as build failure, never crash the loop
-            return compute_score(
-                parse_ok=True,
-                manifest_ok=True,
-                build_ok=False,
-                test_ok=False,
-                command_count=p.command_count,
-                baseline_size=baseline_size,
-                new_size=0,
-                dockerfile_text=new_df,
-                baseline_command_count=baseline_command_count,
-            )
-    return compute_score(
-        parse_ok=True,
-        manifest_ok=True,
-        build_ok=True,
-        test_ok=t.ok,
+    # manifest_gate spawns a single `docker manifest inspect` subprocess per
+    # unique FROM ref; offload to a thread so the rollout event loop is never
+    # blocked on the registry round-trip (typically ~100ms but can be 15s).
+    m = await asyncio.to_thread(manifest_gate, new_df, 15)
+    if not m.ok:
+        logger.info("manifest_gate failed: missing=%s", m.missing)
+        return compute_score(
+            parse_ok=True,
+            manifest_ok=False,
+            build_ok=False,
+            test_ok=False,
+            command_count=p.command_count,
+            baseline_size=baseline_size,
+            new_size=0,
+            dockerfile_text=new_df,
+            baseline_command_count=baseline_command_count,
+        )
+    return await _score_after_manifest_pass(
+        new_df=new_df,
         command_count=p.command_count,
         baseline_size=baseline_size,
-        new_size=b.size_bytes,
-        dockerfile_text=new_df,
         baseline_command_count=baseline_command_count,
+        test_cmd=test_cmd,
+        expected=expected,
     )
