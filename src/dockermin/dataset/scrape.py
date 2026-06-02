@@ -21,6 +21,11 @@ logger = logging.getLogger(__name__)
 # Small pause between gh calls to keep us under secondary rate limits.
 GH_SLEEP_S = 0.5
 RAW_SLEEP_S = 0.1
+# GitHub's search/code API is throttled at 30 requests/min for authenticated
+# users — far stricter than core API (5000/h). Each install-pattern query
+# fetches up to 10 pages; 4 queries * 10 = 40 calls within 1 minute would
+# blow the limit. 2.5s between search pages keeps us at <= 24 calls/min.
+SEARCH_SLEEP_S = 2.5
 
 # GitHub search returns at most this many items per page.
 _SEARCH_PAGE_SIZE = 100
@@ -527,8 +532,12 @@ def _search_code_page(query: str, page: int) -> list[dict[str, Any]]:
     except subprocess.CalledProcessError as exc:
         stderr = (exc.stderr or "").strip() if isinstance(exc.stderr, str) else ""
         logger.warning("gh api search/code failed (rc=%s, query=%r, page=%s): %s", exc.returncode, query, page, stderr)
+        # On a rate-limit hit, sleep one minute to let the per-minute window
+        # reset before the next call. Cheaper than failing the whole scrape.
+        if "rate limit" in stderr.lower():
+            time.sleep(60)
         return []
-    time.sleep(GH_SLEEP_S)
+    time.sleep(SEARCH_SLEEP_S)
     payload = json.loads(out)
     return payload.get("items", []) if isinstance(payload, dict) else []
 
