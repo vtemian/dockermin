@@ -420,9 +420,10 @@ def _walk_chainguard_child(repo: str, child: dict[str, Any], max_depth: int) -> 
         return
     if ctype != "dir" or max_depth <= 0:
         return
-    sub_children = _list_github_dir(repo, path)
-    if sub_children is not None:
-        yield from _walk_chainguard_dir(repo, path, max_depth=max_depth - 1)
+    # Recurse directly; _walk_chainguard_dir does its own _list_github_dir call.
+    # Earlier code fetched the dir listing here too (cubic flagged on PR #11) —
+    # one fetch per directory is enough.
+    yield from _walk_chainguard_dir(repo, path, max_depth=max_depth - 1)
 
 
 def _walk_chainguard_dir(repo: str, root: str, max_depth: int) -> Iterable[str]:
@@ -687,7 +688,10 @@ _INSTALL_PATTERN_QUERIES: tuple[str, ...] = (
     "cargo language:Dockerfile filename:Dockerfile size:<2500",
     '"bundle install" language:Dockerfile filename:Dockerfile size:<2500',
     '"go mod" language:Dockerfile filename:Dockerfile size:<2500',
-    '"dotnet restore" language:Dockerfile filename:Dockerfile size:<2500',
+    # `"dotnet restore"` deferred to v4: needs an annotate probe (_dotnet_probe
+    # in annotate.py's _PROBE_BUILDERS) before scraped candidates can survive
+    # annotation. Without it, hits would resolve to ecosystem='unknown' and be
+    # filtered out (cubic flagged on PR #11).
 )
 
 
