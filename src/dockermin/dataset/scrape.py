@@ -573,6 +573,12 @@ _INSTALL_PATTERN_QUERIES: tuple[str, ...] = (
     "gem language:Dockerfile filename:Dockerfile size:<2500",
     "composer language:Dockerfile filename:Dockerfile size:<2500",
     '"go build" language:Dockerfile filename:Dockerfile size:<2500',
+    # v3 expansion — broaden FROM-base diversity per the failure analysis
+    # in docs/decisions/2026-06-02-v2-headline-result.md.
+    "cargo language:Dockerfile filename:Dockerfile size:<2500",
+    '"bundle install" language:Dockerfile filename:Dockerfile size:<2500',
+    '"go mod" language:Dockerfile filename:Dockerfile size:<2500',
+    '"dotnet restore" language:Dockerfile filename:Dockerfile size:<2500',
 )
 
 

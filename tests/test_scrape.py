@@ -347,3 +347,21 @@ def test_is_new_content_distinct_text_is_new() -> None:
     _is_new_content("FROM python", seen)
     assert _is_new_content("FROM node", seen) is True
     assert len(seen) == 2
+
+
+# --- _INSTALL_PATTERN_QUERIES -------------------------------------------------
+
+
+def test_install_pattern_queries_cover_new_ecosystems() -> None:
+    """v3 must query for rust/ruby/go/dotnet bases to expand FROM diversity."""
+    from dockermin.dataset.scrape import _INSTALL_PATTERN_QUERIES
+
+    queries = set(_INSTALL_PATTERN_QUERIES)
+    must_have = {
+        "cargo language:Dockerfile filename:Dockerfile size:<2500",
+        '"bundle install" language:Dockerfile filename:Dockerfile size:<2500',
+        '"go mod" language:Dockerfile filename:Dockerfile size:<2500',
+        '"dotnet restore" language:Dockerfile filename:Dockerfile size:<2500',
+    }
+    missing = must_have - queries
+    assert not missing, f"v3 must query: {sorted(missing)}"
