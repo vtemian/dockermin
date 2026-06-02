@@ -1,9 +1,15 @@
-"""Grouped train/test split that respects base/variant grouping.
+"""Train/test split utilities.
 
-Every variant of a base shares the base's ``base_id``; a row-level split
-would put a variant in test while its base sits in train, which is not a
-real holdout. We group rows by ``base_id or id`` and assign whole groups
-to one side, so no base appears on both sides.
+Two splitters live here:
+
+- ``grouped_train_test_split`` — the original v0 splitter; deterministic,
+  groups variants with their base. Kept for backfill / one-off rebuilds.
+- ``split_with_frozen_holdout`` — the v3+ splitter. The v0 holdout was an
+  emergent property of ``grouped_train_test_split(seed=0)`` on the 145-row
+  ``triples_with_variants.jsonl`` snapshot that existed at the time. As
+  the training corpus grows, the holdout ids MUST stay constant so v2/v3/v4
+  numbers remain comparable; this function pins the holdout via an explicit
+  id list rather than re-deriving it.
 """
 
 from __future__ import annotations
@@ -11,6 +17,7 @@ from __future__ import annotations
 import math
 import random
 from collections import defaultdict
+from typing import Any
 
 Row = dict[str, object]
 
@@ -50,3 +57,32 @@ def grouped_train_test_split(
         target = test if key in test_keys else train
         target.extend(groups[key])
     return train, test
+
+
+def _row_side(row: dict[str, Any], holdout_ids: set[str]) -> str | None:
+    """Return ``"test"`` if the row's id is in the holdout, ``"train"`` if not,
+    or ``None`` if the row has no id (silently skipped — malformed input must
+    not poison the split).
+    """
+    rid = row.get("id")
+    if rid is None:
+        return None
+    return "test" if rid in holdout_ids else "train"
+
+
+def split_with_frozen_holdout(
+    rows: list[dict[str, Any]], holdout_ids: set[str]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Partition ``rows`` into (train, test) where test contains exactly the rows
+    whose ``id`` is in ``holdout_ids``. Missing ids are silently skipped — the
+    holdout fixture is the source of truth, not the corpus.
+    """
+    if not holdout_ids:
+        msg = "holdout_ids must be non-empty; the v0 holdout is the comparison contract"
+        raise ValueError(msg)
+    sides: dict[str, list[dict[str, Any]]] = {"train": [], "test": []}
+    for row in rows:
+        side = _row_side(row, holdout_ids)
+        if side is not None:
+            sides[side].append(row)
+    return sides["train"], sides["test"]

@@ -1,10 +1,10 @@
-"""Push the variant triple set to HF Hub as vtemian/dockermin-v0.
+"""Push the variant triple set to HF Hub.
 
-Pushes a grouped train/test split: variants share a ``base_id`` with their
-base, so the split groups by base to keep all variants of a base on one
-side (a leaked holdout is worthless). With ~11 distinct bases the test
-fraction is sized to yield >= 3 holdout bases - a small-N caveat that the
-dataset card should call out.
+Uses the frozen v0 holdout — the 37 ids in ``data/curated/holdout_v0_ids.txt``
+always go to test, everything else to train. Without this pin, growing the
+training corpus drifts the holdout and invalidates v2/v3 comparisons. The
+fixture was generated once from ``vtemian/dockermin-v0`` (split='test') and
+is the comparison contract from v1 onward.
 """
 
 from __future__ import annotations
@@ -15,12 +15,11 @@ from pathlib import Path
 
 from datasets import Dataset, DatasetDict
 
-from dockermin.dataset.split import grouped_train_test_split
+from dockermin.dataset.split import split_with_frozen_holdout
 
 IN = Path("data/curated/triples_with_variants.jsonl")
+HOLDOUT_FIXTURE = Path(__file__).parent.parent / "data" / "curated" / "holdout_v0_ids.txt"
 REPO_ID = "vtemian/dockermin-v0"
-TEST_FRAC = 0.3
-SPLIT_SEED = 0
 
 
 def _require_token() -> None:
@@ -29,10 +28,14 @@ def _require_token() -> None:
         raise SystemExit(msg)
 
 
+def _load_holdout_ids() -> set[str]:
+    return {line for line in HOLDOUT_FIXTURE.read_text().splitlines() if line.strip()}
+
+
 def main() -> None:
     _require_token()
     records = [json.loads(line) for line in IN.read_text().splitlines() if line.strip()]
-    train, test = grouped_train_test_split(records, test_frac=TEST_FRAC, seed=SPLIT_SEED)
+    train, test = split_with_frozen_holdout(records, _load_holdout_ids())
     dsd = DatasetDict(
         {
             "train": Dataset.from_list(train),
@@ -42,9 +45,7 @@ def main() -> None:
     dsd.push_to_hub(
         REPO_ID,
         private=False,
-        commit_message=(
-            f"v0: {len(records)} triples, grouped split ({len(train)} train / {len(test)} test rows, by base_id)"
-        ),
+        commit_message=(f"{len(records)} triples, frozen v0 holdout ({len(train)} train / {len(test)} test rows)"),
     )
     print(f"pushed {len(train)} train + {len(test)} test rows to {REPO_ID}")
 
