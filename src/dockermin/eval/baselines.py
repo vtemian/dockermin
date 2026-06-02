@@ -600,9 +600,14 @@ def baseline_manual_best_practice(triple: dict[str, Any]) -> EvalEntry:
 _HF_HANDLE: dict[str, Any] = {}
 
 
-def _hf_dockermin(model_id: str) -> tuple[Any, Any]:
-    """Lazy-load Qwen base + PEFT adapter for inference."""
-    if "model" in _HF_HANDLE and _HF_HANDLE.get("adapter") == model_id:
+def _hf_dockermin(model_id: str, subfolder: str | None = None) -> tuple[Any, Any]:
+    """Lazy-load Qwen base + PEFT adapter for inference.
+
+    The cache key includes ``subfolder`` so two checkpoints of the same repo
+    (e.g. ``step_100`` vs ``step_250``) don't collide on the singleton handle.
+    """
+    cache_key = (model_id, subfolder)
+    if "model" in _HF_HANDLE and _HF_HANDLE.get("adapter") == cache_key:
         return _HF_HANDLE["model"], _HF_HANDLE["tok"]
     from peft import PeftModel
     from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -610,16 +615,20 @@ def _hf_dockermin(model_id: str) -> tuple[Any, Any]:
     base_id = "Qwen/Qwen2.5-Coder-7B-Instruct"
     tok = AutoTokenizer.from_pretrained(base_id)
     base = AutoModelForCausalLM.from_pretrained(base_id, torch_dtype="bfloat16", device_map="auto")
-    model = PeftModel.from_pretrained(base, model_id)
+    if subfolder is not None:
+        model = PeftModel.from_pretrained(base, model_id, subfolder=subfolder)
+    else:
+        model = PeftModel.from_pretrained(base, model_id)
     _HF_HANDLE["model"] = model
     _HF_HANDLE["tok"] = tok
-    _HF_HANDLE["adapter"] = model_id
+    _HF_HANDLE["adapter"] = cache_key
     return model, tok
 
 
 def baseline_dockermin(
     triple: dict[str, Any],
     model_id: str = "vtemian/dockermin-qwen7b-lora-v1",
+    subfolder: str | None = None,
     temperature: float = 0.2,
     max_new_tokens: int = 1024,
 ) -> EvalEntry:
@@ -627,7 +636,7 @@ def baseline_dockermin(
     t0 = time.perf_counter()
     try:
         msgs = format_messages(triple["dockerfile"])
-        model, tok = _hf_dockermin(model_id)
+        model, tok = _hf_dockermin(model_id, subfolder=subfolder)
         prompt = tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
         enc = tok(prompt, return_tensors="pt").to(model.device)
         out = model.generate(**enc, max_new_tokens=max_new_tokens, temperature=temperature, do_sample=True)
