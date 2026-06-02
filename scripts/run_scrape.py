@@ -8,6 +8,7 @@ from pathlib import Path
 
 from dockermin.dataset.scrape import (
     fetch_awesome_compose,
+    fetch_chainguard_images,
     fetch_github_search,
     fetch_official_images,
 )
@@ -19,10 +20,13 @@ def main() -> None:
     OUT.parent.mkdir(parents=True, exist_ok=True)
     count = 0
     with OUT.open("w") as f:
-        for c in fetch_official_images(limit=120):
+        for c in fetch_official_images(limit=250):
             f.write(json.dumps(asdict(c)) + "\n")
             count += 1
         for c in fetch_awesome_compose(limit=80):
+            f.write(json.dumps(asdict(c)) + "\n")
+            count += 1
+        for c in fetch_chainguard_images(limit=50):
             f.write(json.dumps(asdict(c)) + "\n")
             count += 1
         for c in fetch_github_search(limit=300):
