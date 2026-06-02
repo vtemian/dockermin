@@ -48,6 +48,20 @@ class TestResult:
 
 
 @dataclass(frozen=True)
+class ManifestResult:
+    """Outcome of the manifest pre-build gate.
+
+    ``ok`` is False if any FROM image fails both the local-image-inspect and
+    the registry manifest-inspect probes. ``missing`` lists the offending image
+    refs (deduped, preserves first-seen order) for logging/observability.
+    """
+
+    ok: bool
+    missing: tuple[str, ...] = ()
+    error: str = ""
+
+
+@dataclass(frozen=True)
 class AnnotateResult:
     ok: bool
     baseline_size: int = 0
@@ -58,6 +72,51 @@ class AnnotateResult:
 
 def _docker_client() -> docker.DockerClient:
     return docker.from_env(timeout=600)
+
+
+def _stage_alias(from_value: tuple[str, ...]) -> str | None:
+    """Return the AS-alias declared by a FROM tuple, or None.
+
+    ``value`` for ``FROM python:3.12 AS builder`` is ``('python:3.12', 'AS', 'builder')``;
+    a bare ``FROM scratch`` has no alias.
+    """
+    upper = tuple(tok.upper() for tok in from_value)
+    if "AS" not in upper:
+        return None
+    idx = upper.index("AS")
+    if idx + 1 >= len(from_value):
+        return None
+    return from_value[idx + 1]
+
+
+def _from_commands(df_text: str) -> list[tuple[str, ...]]:
+    """Parsed FROM-instruction value tuples, in source order. Empty on parse failure."""
+    try:
+        commands = dockerfile.parse_string(df_text)
+    except dockerfile.GoParseError:
+        return []
+    return [cmd.value for cmd in commands if cmd.cmd.upper() == "FROM" and cmd.value]
+
+
+def find_from_images(df_text: str) -> list[str]:
+    """Return the unique FROM image refs in dockerfile order.
+
+    Skips ``FROM scratch`` and stage aliases declared via ``AS``. Returns an
+    empty list on parse failure; downstream gates handle that via parse_gate's
+    own ok flag.
+    """
+    aliases: set[str] = set()
+    seen: set[str] = set()
+    out: list[str] = []
+    for value in _from_commands(df_text):
+        base = value[0]
+        if base.lower() != "scratch" and base not in aliases and base not in seen:
+            seen.add(base)
+            out.append(base)
+        alias = _stage_alias(value)
+        if alias is not None:
+            aliases.add(alias)
+    return out
 
 
 def parse_gate(df_text: str) -> ParseResult:
