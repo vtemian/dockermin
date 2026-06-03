@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import verifiers as vf
 from datasets import load_dataset
 
@@ -9,10 +11,14 @@ from dockermin.dataset.annotate import parse_gate
 from dockermin.reward.dockermin_reward import dockermin_reward
 from dockermin.reward.prompts import SYSTEM_PROMPT, USER_TEMPLATE
 
+DATASET_ID = os.environ.get("DOCKERMIN_DATASET_ID", "vtemian/dockermin-v1")
+# v3 default: vtemian/dockermin-v1 (198 train, 37 frozen-from-v0 test, 14 unique
+# bases). Override via DOCKERMIN_DATASET_ID env var (e.g. for a v0 baseline run).
+
 
 def load_environment(**_kwargs) -> vf.Environment:
-    train_ds = load_dataset("vtemian/dockermin-v0", split="train")
-    eval_ds = load_dataset("vtemian/dockermin-v0", split="test")
+    train_ds = load_dataset(DATASET_ID, split="train")
+    eval_ds = load_dataset(DATASET_ID, split="test")
 
     def fmt(ex):
         return {
