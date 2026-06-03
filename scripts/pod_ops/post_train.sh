@@ -5,9 +5,13 @@
 set -uo pipefail
 
 POD_ID="${1:?usage: post_train.sh <POD_ID>}"
-HF_REPO="${HF_REPO:-vtemian/dockermin-qwen7b-lora-v2}"
+# Both HF_REPO and MAX_STEPS must be set explicitly per run. The previous v2
+# defaults silently terminated v3 training at step 250 (v3 config wanted 500)
+# AND pushed v3 adapters into the v2 HF repo, overwriting v2 weights —
+# see docs/decisions/2026-06-03 for the postmortem.
+HF_REPO="${HF_REPO:?HF_REPO env var required (e.g. vtemian/dockermin-qwen7b-lora-v3)}"
+MAX_STEPS="${MAX_STEPS:?MAX_STEPS env var required (must match the run's config max_steps)}"
 RUN_DIR="${RUN_DIR:-$HOME/prime-rl/outputs/run_default}"
-MAX_STEPS="${MAX_STEPS:-250}"
 WATCHDOG_SECONDS="${WATCHDOG_SECONDS:-86400}"  # 24h (A100 is ~2x slower than H100)
 
 export PATH="$HOME/.local/bin:$PATH"
