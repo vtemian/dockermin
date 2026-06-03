@@ -7,7 +7,7 @@ set -uo pipefail
 # previous default `vtemian/dockermin-qwen7b-lora-v2` silently overwrote v2
 # adapters during the v3 training session — see docs/decisions/2026-06-03
 # for the postmortem. Fail loudly if the caller forgot.
-HF_REPO="${HF_REPO:?HF_REPO env var required (e.g. vtemian/dockermin-qwen7b-lora-v3)}"
+HF_REPO="${HF_REPO:?HF_REPO env var required - e.g. vtemian/dockermin-qwen7b-lora-v3}"
 RUN_DIR="${RUN_DIR:-$HOME/prime-rl/outputs/run_default}"
 LOG="$HOME/hf_pusher.log"
 PUSHED_FILE="$HOME/.hf_pushed"
