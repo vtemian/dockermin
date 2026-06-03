@@ -3,7 +3,11 @@
 # doesn't lose the latest converged adapter. Idempotent: tracks already-pushed
 # broadcasts in $HOME/.hf_pushed.
 set -uo pipefail
-HF_REPO="${HF_REPO:-vtemian/dockermin-qwen7b-lora-v2}"
+# HF_REPO must be set explicitly per run (v2 / v3 / v3-ablation-a / ...). The
+# previous default `vtemian/dockermin-qwen7b-lora-v2` silently overwrote v2
+# adapters during the v3 training session — see docs/decisions/2026-06-03
+# for the postmortem. Fail loudly if the caller forgot.
+HF_REPO="${HF_REPO:?HF_REPO env var required (e.g. vtemian/dockermin-qwen7b-lora-v3)}"
 RUN_DIR="${RUN_DIR:-$HOME/prime-rl/outputs/run_default}"
 LOG="$HOME/hf_pusher.log"
 PUSHED_FILE="$HOME/.hf_pushed"
