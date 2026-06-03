@@ -52,7 +52,11 @@ echo "=== dockermin HEAD: $DOCKERMIN_HEAD ==="
 cd "$HOME/prime-rl"
 uv pip install --no-deps -e "$HOME/dockermin"
 uv pip install --no-deps -e "$HOME/dockermin/prime_env/dockermin_env"
-uv pip install dockerfile==3.3.1 "docker==7.1.*" tenacity
+# peft + accelerate are required at eval time (PeftModel.from_pretrained +
+# transformers device_map="auto"). They're transitive deps of prime-rl but
+# `uv pip install --no-deps -e dockermin` skips them. Without these, every
+# eval row fails with ModuleNotFoundError.
+uv pip install dockerfile==3.3.1 "docker==7.1.*" tenacity peft accelerate
 
 # Patch wandb config to per-process offline (top-level [wandb].offline is rejected by `rl`)
 python3 - <<'PY'
