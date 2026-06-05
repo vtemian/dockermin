@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import os
 import re
 import subprocess
 import tempfile
@@ -213,20 +214,38 @@ def _manifest_exists_in_registry(image_ref: str, timeout_s: int = 15) -> bool:
 
 
 def _resolves(image_ref: str, timeout_s: int) -> bool:
-    """True if ``image_ref`` is locally cached or its manifest is in the registry."""
-    return _image_exists_locally(image_ref) or _manifest_exists_in_registry(image_ref, timeout_s=timeout_s)
+    """True if the image's manifest is in the registry.
+
+    The earlier implementation short-circuited via ``docker image inspect`` for
+    locally-cached images. v3 forensic analysis (2026-06-05) showed this defeated
+    the gate's purpose: training pods accumulated local caches that masked
+    hallucinated tags, so manifest_gate effectively never fired across 250 steps.
+    The registry probe is the source of truth — slower per call (~100ms) but the
+    gradient signal is now actually delivered.
+    """
+    return _manifest_exists_in_registry(image_ref, timeout_s=timeout_s)
+
+
+# Diagnostic counters so training runs can verify the gate is actually firing.
+# v3 forensic analysis (2026-06-05) could not tell whether the gate ever
+# triggered during training — these counters write to DOCKERMIN_GATE_LOG (env)
+# every time the gate is invoked. Tail the file from the pod to see live hits.
+_MANIFEST_INVOCATIONS = 0
+_MANIFEST_HITS = 0
 
 
 def manifest_gate(df_text: str, timeout_s: int = 15) -> ManifestResult:
-    """Check every unique FROM image resolves either locally or in the registry.
+    """Check every unique FROM image resolves in the registry.
 
-    Probe order per image: local image-inspect for cache hit, then registry
-    manifest-inspect for tag resolution. Pass if either succeeds. ``FROM scratch``
-    and stage aliases are filtered upstream by ``find_from_images``.
+    Probe per image: ``docker manifest inspect`` (no local-cache shortcut —
+    see ``_resolves`` for why). ``FROM scratch`` and stage aliases are filtered
+    upstream by ``find_from_images``.
 
     Returns ``ManifestResult(ok=False)`` with the offending refs in ``missing``
     when any FROM cannot be resolved.
     """
+    global _MANIFEST_INVOCATIONS, _MANIFEST_HITS  # noqa: PLW0603 — diagnostic counters
+    _MANIFEST_INVOCATIONS += 1
     images = find_from_images(df_text)
     if not images:
         # No registry images to probe — multi-stage scratch-only, or parse
@@ -235,8 +254,31 @@ def manifest_gate(df_text: str, timeout_s: int = 15) -> ManifestResult:
         return ManifestResult(ok=True)
     missing = tuple(image for image in images if not _resolves(image, timeout_s))
     if missing:
+        _MANIFEST_HITS += 1
+        _log_gate_event("HIT", images, missing)
         return ManifestResult(ok=False, missing=missing, error=f"manifest not found: {', '.join(missing)}")
     return ManifestResult(ok=True)
+
+
+def _log_gate_event(kind: str, images: list[str], missing: tuple[str, ...]) -> None:
+    """Append-only line to DOCKERMIN_GATE_LOG describing a gate event.
+
+    Lightweight; one line per HIT keeps overhead negligible while making the
+    firing rate observable from the pod via ``tail -f $DOCKERMIN_GATE_LOG``.
+    No-op if the env var is unset (default for local pytest runs).
+    """
+    path = os.environ.get("DOCKERMIN_GATE_LOG")
+    if not path:
+        return
+    try:
+        with Path(path).open("a") as fh:
+            fh.write(
+                f"{kind} invocations={_MANIFEST_INVOCATIONS} hits={_MANIFEST_HITS} "
+                f"images={images} missing={list(missing)}\n"
+            )
+    except OSError:
+        # Diagnostic logging must never break the reward path.
+        pass
 
 
 def build_gate(
