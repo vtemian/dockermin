@@ -14,9 +14,17 @@ if [ ! -d dockermin ]; then
     git clone https://github.com/vtemian/dockermin.git
 fi
 cd dockermin
-git fetch origin
-git checkout feat/gemma-zero-shot-baseline
-git pull --ff-only
+git fetch origin --tags
+# DOCKERMIN_REV pins what runs on the pod. Default is main for reproducibility.
+# When iterating on the probe scripts themselves, pass a branch or commit SHA
+# (e.g. DOCKERMIN_REV=feat/gemma-zero-shot-baseline) to test the in-flight
+# version. The script never silently follows a moving branch tip.
+DOCKERMIN_REV="${DOCKERMIN_REV:-main}"
+git checkout "$DOCKERMIN_REV"
+# Only fast-forward if the rev is a branch (not a tag or SHA, which are immutable).
+if git symbolic-ref -q HEAD >/dev/null; then
+    git pull --ff-only
+fi
 
 # Bootstrap python3-venv — massedcompute ubuntu_22_cuda_12 image ships
 # python3.10's venv module but is missing ensurepip, which python3 -m venv
@@ -62,8 +70,11 @@ pip install \
 
 # Massedcompute pods don't put the ubuntu user in the docker group by default,
 # so any docker call from the eval venv hits "permission denied" on the unix
-# socket. Loosen the socket perms — this is a single-purpose probe pod.
-sudo chmod 666 /var/run/docker.sock
+# socket. Add the user to the docker group — the run script uses `sg docker -c`
+# to activate that group inside the same SSH session without re-login. We
+# deliberately do NOT chmod 666 the socket: that's a local privilege-escalation
+# path that would let anything on the pod own the docker daemon, even though
+# the pod is single-purpose and ephemeral.
 sudo usermod -aG docker ubuntu
 
 # Editable dockermin without --no-deps would re-pin transformers down to 4.46.

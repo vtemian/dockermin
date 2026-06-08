@@ -18,6 +18,12 @@ cd "$HOME/dockermin"
 # shellcheck disable=SC1091
 source "$HOME/gemma-probe-venv/bin/activate"
 
+# install_gemma_probe.sh adds the user to the docker group; that membership is
+# not active in this SSH session yet. `sg docker -c CMD` runs CMD in a subshell
+# where the group is live, without re-login or chmoding the socket. Used below
+# for every docker invocation.
+DOCKER='sg docker -c'
+
 # Pod self-termination is optional: the prime CLI is not installed in the
 # probe venv. If it happens to be on PATH (e.g. from a different venv),
 # call it; otherwise rely on the operator's manual terminate from outside.
@@ -59,15 +65,18 @@ from datasets import load_dataset
 import re, subprocess
 ds = load_dataset("vtemian/dockermin-v0", split="test")
 bases = set()
+# The regex skips zero-or-more --flag args so that e.g.
+# `FROM --platform=linux/amd64 python:3.9-slim` resolves to `python:3.9-slim`
+# rather than `--platform=...`.
 for ex in ds:
-    for m in re.finditer(r"^FROM\s+(\S+)", ex["dockerfile"], re.I | re.M):
+    for m in re.finditer(r"^FROM\s+(?:--\S+\s+)*(\S+)", ex["dockerfile"], re.I | re.M):
         tag = m.group(1)
         if tag.lower() != "scratch" and ":" in tag:
             bases.add(tag)
 print(f"pre-warming {len(bases)} unique base images from holdout")
 for b in sorted(bases):
     try:
-        r = subprocess.run(["docker", "pull", b], capture_output=True, timeout=300)
+        r = subprocess.run(["sg", "docker", "-c", f"docker pull {b}"], capture_output=True, timeout=300)
         print(f"  {'OK' if r.returncode == 0 else 'SKIP'} {b}")
     except subprocess.TimeoutExpired:
         print(f"  TIMEOUT {b}")
@@ -78,7 +87,7 @@ PYEOF
 for img in python:3.9-slim python:3.12-slim python:3.12-slim-bookworm \
            eclipse-temurin:25-jdk-resolute eclipse-temurin:25-jdk-noble \
            php:8.5-apache-trixie node:14-slim node:14-buster-slim; do
-    docker pull "$img" >/dev/null 2>&1 && echo "OK $img (rewrite prewarm)" || echo "SKIP $img"
+    $DOCKER "docker pull $img" >/dev/null 2>&1 && echo "OK $img (rewrite prewarm)" || echo "SKIP $img"
 done
 
 # Run the eval — same temperature / max_new_tokens as the v2 / v3 baselines
