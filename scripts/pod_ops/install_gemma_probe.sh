@@ -41,17 +41,30 @@ fi
 source "$HOME/gemma-probe-venv/bin/activate"
 
 pip install -U pip wheel
+# transformers 5.10.2 references torch.float8_e8m0fnu (microexponents fp8)
+# which lands in torch 2.7. Lower torch pins won't pass `import transformers`.
+# dockerfile is a runtime import in dataset/annotate.py.
+# peft is deliberately omitted — its import chain bottoms out in transformers'
+# fp8 module which loads at import time, and the gemma_zs baseline never
+# needs PEFT (only the dockermin LoRA adapter baseline does).
 pip install \
     "transformers>=5.10.2" \
-    "torch>=2.5,<2.7" \
+    "torch>=2.7" \
     "accelerate>=1.1" \
     "huggingface_hub>=0.26" \
     "docker==7.1.*" \
+    "dockerfile==3.3.1" \
     "tenacity>=8" \
     "tqdm>=4.66" \
     "datasets>=3" \
     "anthropic" \
     "openai"
+
+# Massedcompute pods don't put the ubuntu user in the docker group by default,
+# so any docker call from the eval venv hits "permission denied" on the unix
+# socket. Loosen the socket perms — this is a single-purpose probe pod.
+sudo chmod 666 /var/run/docker.sock
+sudo usermod -aG docker ubuntu
 
 # Editable dockermin without --no-deps would re-pin transformers down to 4.46.
 # --ignore-requires-python because pyproject pins ==3.11.* (the trainer's
