@@ -25,6 +25,7 @@ Tracks compute spend against the $400 cap. Append per session, do not edit prior
 | 2026-05-31 | Eval pod (dockermin v2 step_250) | crusoe | 1xA100 80GB | 2026-05-31T08:43:54Z | 2026-05-31T11:00:00Z | 2.27 | $1.79 | $4.06 | dockermin v2 step_250 = 21/37 pass (56.8%); successful |
 | 2026-05-31 | Eval pod (step_100+step_250 @ T=1.0) | massedcompute | 1xA100 80GB | 2026-05-31T14:55:00Z | 2026-05-31T17:25:00Z | 2.50 | $1.79 | $4.48 | both T=1.0 runs completed before pod died UNKNOWN; results pushed via 60s loop |
 | 2026-06-01 | Eval pod (step_100 @ T=0.2) | massedcompute | 1xA100 80GB | 2026-06-01T19:05:30Z | 2026-06-01T20:15:00Z | 1.16 | $1.79 | $2.08 | step_100 @ T=0.2 = 20/37 pass (54.1%); 37 rows pushed before pod died UNKNOWN |
+| 2026-06-08 | Gemma 4 12B-it zero-shot probe | massedcompute | 1xA100 80GB SXM4 | 2026-06-08T18:45:04Z | 2026-06-08T19:46:00Z | 1.02 | $1.23 | $1.22 | 30/37 pass (81.1%), reduction|pass 38.2%, 13.67 GB saved; first model swap to clear MDE; install-debug round-trips inflated wall to ~2h but billing was ~1h |
 
 **Eval note (2026-05-27):** eval pod fully set up (prime-rl/vllm/transformers/peft + dockermin +
 hadolint + slim + DooD + OpenAI key) then TERMINATED without running the eval — Vlad left and an
