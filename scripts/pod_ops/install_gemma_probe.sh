@@ -29,7 +29,11 @@ fi
 # transformers==4.46 venv prime-rl owns. Uses whatever python3 ships on the
 # pod (transformers 5.x requires 3.10+; the project pin is 3.11 but the probe
 # venv runs eval only, not training, so 3.10 is fine).
-if [ ! -d "$HOME/gemma-probe-venv" ]; then
+#
+# Idempotency: detect an incomplete venv (e.g. an earlier run that aborted
+# before ensurepip ran) by checking for bin/activate, not just the dir.
+if [ ! -f "$HOME/gemma-probe-venv/bin/activate" ]; then
+    rm -rf "$HOME/gemma-probe-venv"
     python3 -m venv "$HOME/gemma-probe-venv"
 fi
 # shellcheck disable=SC1091
