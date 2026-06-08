@@ -54,7 +54,10 @@ pip install \
     "openai"
 
 # Editable dockermin without --no-deps would re-pin transformers down to 4.46.
-pip install -e . --no-deps
+# --ignore-requires-python because pyproject pins ==3.11.* (the trainer's
+# constraint), while this probe venv runs on the pod's system python3.10 —
+# fine for eval-only code which is just stdlib + transformers/datasets/docker.
+pip install -e . --no-deps --ignore-requires-python
 
 # Stage HF token (mirrors the prime-rl pod pattern).
 mkdir -p "$HOME/.cache/huggingface"
