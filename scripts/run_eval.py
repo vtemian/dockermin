@@ -126,7 +126,7 @@ def main() -> int:
                     kwargs["model_id"] = args.dockermin_model
                     if args.dockermin_subfolder:
                         kwargs["subfolder"] = args.dockermin_subfolder
-                if baseline in {"qwen_zs", "dockermin"}:
+                if baseline in {"qwen_zs", "gemma_zs", "dockermin"}:
                     kwargs["temperature"] = args.temperature
                     kwargs["max_new_tokens"] = args.max_new_tokens
                 try:

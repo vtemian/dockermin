@@ -168,6 +168,52 @@ def baseline_qwen_zero_shot(triple: dict[str, Any], temperature: float = 0.2, ma
 
 
 # ---------------------------------------------------------------------------
+# Baseline 1b: Gemma 4 zero-shot (transformers >= 5.10.2 required)
+# ---------------------------------------------------------------------------
+# Gemma 4 advertises model_type=gemma4_unified and is rejected by transformers
+# 4.46 (our project pin). This baseline runs on a separate pod venv pinned to
+# transformers>=5.10.2; see docs/plans/2026-06-08-gemma4-zero-shot-probe.md.
+_GEMMA_HANDLE: dict[str, Any] = {}
+
+
+def _hf_gemma(model_id: str) -> tuple[Any, Any]:
+    """Lazy-load a Gemma 4 instruct checkpoint via transformers."""
+    if _GEMMA_HANDLE.get("id") == model_id:
+        return _GEMMA_HANDLE["model"], _GEMMA_HANDLE["tok"]
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    tok = AutoTokenizer.from_pretrained(model_id)
+    model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype="bfloat16", device_map="auto")
+    _GEMMA_HANDLE["model"] = model
+    _GEMMA_HANDLE["tok"] = tok
+    _GEMMA_HANDLE["id"] = model_id
+    return model, tok
+
+
+def baseline_gemma_zero_shot(
+    triple: dict[str, Any],
+    model_id: str = "google/gemma-4-12B-it",
+    temperature: float = 0.2,
+    max_new_tokens: int = 1024,
+) -> EvalEntry:
+    """Base Gemma 4 instruct with the standard prompt, no fine-tuning (transformers)."""
+    t0 = time.perf_counter()
+    try:
+        msgs = format_messages(triple["dockerfile"])
+        model, tok = _hf_gemma(model_id)
+        prompt = tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
+        enc = tok(prompt, return_tensors="pt").to(model.device)
+        out = model.generate(**enc, max_new_tokens=max_new_tokens, temperature=temperature, do_sample=True)
+        text = tok.decode(out[0][enc.input_ids.shape[1] :], skip_special_tokens=True)
+        new_df = extract_dockerfile(text)
+        if new_df is None:
+            return _error_entry("gemma_zs", triple, t0, "no fenced dockerfile block")
+        return _entry("gemma_zs", triple, new_df, t0)
+    except Exception as e:  # noqa: BLE001 — safety net: one bad Dockerfile must not crash the eval loop
+        return _error_entry("gemma_zs", triple, t0, f"gemma error: {e!r}")
+
+
+# ---------------------------------------------------------------------------
 # Baseline 2: GPT-4o zero-shot
 # ---------------------------------------------------------------------------
 
@@ -655,6 +701,7 @@ def baseline_dockermin(
 
 _REGISTRY: dict[str, Callable[..., EvalEntry]] = {
     "qwen_zs": baseline_qwen_zero_shot,
+    "gemma_zs": baseline_gemma_zero_shot,
     "gpt4o": baseline_gpt4o,
     "sonnet_zs": baseline_sonnet_zero_shot,
     "hadolint": baseline_hadolint,

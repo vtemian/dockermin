@@ -228,7 +228,7 @@ def test_collapse_single_run_unchanged() -> None:
 def test_available_baselines_returns_sorted_known_names() -> None:
     names = baselines.available_baselines()
     assert names == sorted(names)
-    assert {"hadolint", "manual", "qwen_zs", "gpt4o", "sonnet_zs", "slim", "dockermin"} <= set(names)
+    assert {"hadolint", "manual", "qwen_zs", "gemma_zs", "gpt4o", "sonnet_zs", "slim", "dockermin"} <= set(names)
 
 
 def test_register_baseline_adds_dispatchable_name() -> None:
