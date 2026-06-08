@@ -19,9 +19,11 @@ git checkout feat/gemma-zero-shot-baseline
 git pull --ff-only
 
 # Separate venv at $HOME/gemma-probe-venv — must not share state with the
-# transformers==4.46 venv prime-rl owns.
+# transformers==4.46 venv prime-rl owns. Uses whatever python3 ships on the
+# pod (transformers 5.x requires 3.10+; the project pin is 3.11 but the probe
+# venv runs eval only, not training, so 3.10 is fine).
 if [ ! -d "$HOME/gemma-probe-venv" ]; then
-    python3.11 -m venv "$HOME/gemma-probe-venv"
+    python3 -m venv "$HOME/gemma-probe-venv"
 fi
 # shellcheck disable=SC1091
 source "$HOME/gemma-probe-venv/bin/activate"
