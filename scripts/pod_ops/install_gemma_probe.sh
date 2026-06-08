@@ -19,10 +19,11 @@ git checkout feat/gemma-zero-shot-baseline
 git pull --ff-only
 
 # Bootstrap python3-venv — massedcompute ubuntu_22_cuda_12 image ships
-# python3.10 without the venv module.
-if ! python3 -c "import venv" 2>/dev/null; then
+# python3.10's venv module but is missing ensurepip, which python3 -m venv
+# needs to bootstrap pip into a fresh venv.
+if ! python3 -c "import ensurepip" 2>/dev/null; then
     sudo apt-get update -qq
-    sudo apt-get install -qq -y python3-venv python3.10-venv
+    sudo apt-get install -qq -y python3.10-venv
 fi
 
 # Separate venv at $HOME/gemma-probe-venv — must not share state with the
