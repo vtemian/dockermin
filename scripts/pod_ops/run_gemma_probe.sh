@@ -18,7 +18,17 @@ cd "$HOME/dockermin"
 # shellcheck disable=SC1091
 source "$HOME/gemma-probe-venv/bin/activate"
 
-terminate() { prime pods terminate "$POD_ID" --yes 2>&1 | head -1 || true; }
+# Pod self-termination is optional: the prime CLI is not installed in the
+# probe venv. If it happens to be on PATH (e.g. from a different venv),
+# call it; otherwise rely on the operator's manual terminate from outside.
+# Either way the eval will write its final HF push before exiting.
+terminate() {
+    if command -v prime >/dev/null 2>&1; then
+        prime pods terminate "$POD_ID" --yes 2>&1 | head -1 || true
+    else
+        echo "[$(date -u)] prime CLI not on pod — operator must terminate $POD_ID externally"
+    fi
+}
 trap terminate EXIT
 ( sleep 14400; echo "[$(date -u)] WATCHDOG 4h"; terminate ) &
 

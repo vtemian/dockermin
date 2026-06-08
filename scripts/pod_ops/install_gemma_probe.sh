@@ -62,7 +62,7 @@ pip install -e . --no-deps --ignore-requires-python
 # Stage HF token (mirrors the prime-rl pod pattern).
 mkdir -p "$HOME/.cache/huggingface"
 echo -n "$HF_TOKEN" > "$HOME/.cache/huggingface/token"
-huggingface-cli whoami
+hf auth whoami
 
 # Verify the architecture is recognized before paying for the weights download.
 python - <<'PYEOF'
