@@ -10,10 +10,10 @@ authors = [{ name = "Vlad Temian", email = "vladtemian@gmail.com" }]
 dependencies = [
   # prime-rl pulls verifiers, vllm, transformers, peft transitively.
   # Pinning prime-rl explicitly + leaving verifiers floating to whatever prime-rl needs.
-  "prime-rl @ git+https://github.com/PrimeIntellect-ai/prime-rl@91182b7d647285a3e9e32f7959fdc3ff044d9330",  # post-#1392 NCCL+LoRA fix
+  "prime-rl @ git+https://github.com/PrimeIntellect-ai/prime-rl@d5ce4ce84d6b1830bb3d33636a01e1cad17a8971",  # v4: main HEAD for Gemma 4 (transformers 5.6+, vllm 0.22+)
   "verifiers>=0.1.5",        # 0.1.4 lacks LoRA hotswap glue; prime-rl needs newer
   "vllm==0.7.3",
-  "transformers==4.46.*",
+  "transformers>=5.10.2",
   "peft==0.13.*",
   "torch==2.5.*",
   "accelerate==1.1.*",
