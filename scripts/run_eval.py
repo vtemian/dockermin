@@ -122,11 +122,11 @@ def main() -> int:
         for baseline in args.baselines:
             for triple in triples:
                 kwargs: dict = {}
-                if baseline == "dockermin":
+                if baseline in {"dockermin", "dockermin_v4"}:
                     kwargs["model_id"] = args.dockermin_model
                     if args.dockermin_subfolder:
                         kwargs["subfolder"] = args.dockermin_subfolder
-                if baseline in {"qwen_zs", "gemma_zs", "dockermin"}:
+                if baseline in {"qwen_zs", "gemma_zs", "dockermin", "dockermin_v4"}:
                     kwargs["temperature"] = args.temperature
                     kwargs["max_new_tokens"] = args.max_new_tokens
                 try:
