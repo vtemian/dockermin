@@ -62,8 +62,8 @@ echo "=== $(date -u) uv sync done ==="
 # rejects Gemma 4's model_type=gemma4_unified at config load.
 RESOLVED_TFM=$(uv run --no-sync python -c "import transformers; print(transformers.__version__)")
 echo "resolved transformers=$RESOLVED_TFM"
-uv run --no-sync python -c "import transformers, sys; v = transformers.__version__; sys.exit(0 if tuple(map(int, v.split('.')[:2])) >= (5, 10) else 1)" \
-    || { echo "transformers < 5.10 — Gemma 4 will not load; aborting"; exit 1; }
+uv run --no-sync python -c "import transformers, sys; v = transformers.__version__; sys.exit(0 if tuple(map(int, v.split('.')[:3])) >= (5, 10, 2) else 1)" \
+    || { echo "transformers < 5.10.2 — Gemma 4 will not load; aborting"; exit 1; }
 
 # vLLM version is informational only — known issue: <= 0.22.1 lacks
 # Gemma4UnifiedForConditionalGeneration and falls back to the transformers

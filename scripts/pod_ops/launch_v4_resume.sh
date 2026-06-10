@@ -7,7 +7,7 @@ set -uo pipefail
 RESUME_STEP="${RESUME_STEP:-0}"
 cd "$HOME/prime-rl"
 export PATH="$HOME/.local/bin:$PATH"
-export DOCKERMIN_MAX_BUILDS=12
+export DOCKERMIN_MAX_BUILDS=4
 export WANDB_MODE=offline
 
 # install_v4.sh runs `usermod -aG docker ubuntu`; the group is not active in
@@ -64,7 +64,7 @@ echo "trainer pid=$!"
 # 3. ORCHESTRATOR
 ORC_LOG="$HOME/orchestrator.log"
 : > "$ORC_LOG"
-setsid env PATH="$HOME/.local/bin:$PATH" DOCKERMIN_MAX_BUILDS=12 WANDB_MODE=offline \
+setsid env PATH="$HOME/.local/bin:$PATH" DOCKERMIN_MAX_BUILDS=4 WANDB_MODE=offline \
   nohup "$HOME/.local/bin/uv" run --no-sync orchestrator @ outputs/configs/orchestrator.toml \
   </dev/null >"$ORC_LOG" 2>&1 &
 echo "orchestrator pid=$!"
