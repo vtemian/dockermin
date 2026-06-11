@@ -696,6 +696,60 @@ def baseline_dockermin(
 
 
 # ---------------------------------------------------------------------------
+# Baseline 7b: dockermin v4 LoRA (base Gemma 4 12B-it + PEFT adapter)
+# ---------------------------------------------------------------------------
+# Same plumbing as baseline_dockermin but rooted at the Gemma 4 base. v4 GRPO
+# arc trains on top of google/gemma-4-12B-it; eval applies the resulting LoRA
+# the same way. See docs/plans/2026-06-09-v4-gemma-grpo.md.
+_HF_GEMMA_LORA_HANDLE: dict[str, Any] = {}
+
+
+def _hf_dockermin_gemma(model_id: str, subfolder: str | None = None) -> tuple[Any, Any]:
+    """Lazy-load Gemma 4 12B-it base + PEFT adapter for inference."""
+    cache_key = (model_id, subfolder)
+    if "model" in _HF_GEMMA_LORA_HANDLE and _HF_GEMMA_LORA_HANDLE.get("adapter") == cache_key:
+        return _HF_GEMMA_LORA_HANDLE["model"], _HF_GEMMA_LORA_HANDLE["tok"]
+    from peft import PeftModel
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    base_id = "google/gemma-4-12B-it"
+    tok = AutoTokenizer.from_pretrained(base_id)
+    base = AutoModelForCausalLM.from_pretrained(base_id, torch_dtype="bfloat16", device_map="auto")
+    if subfolder is not None:
+        model = PeftModel.from_pretrained(base, model_id, subfolder=subfolder)
+    else:
+        model = PeftModel.from_pretrained(base, model_id)
+    _HF_GEMMA_LORA_HANDLE["model"] = model
+    _HF_GEMMA_LORA_HANDLE["tok"] = tok
+    _HF_GEMMA_LORA_HANDLE["adapter"] = cache_key
+    return model, tok
+
+
+def baseline_dockermin_gemma(
+    triple: dict[str, Any],
+    model_id: str = "vtemian/dockermin-gemma4-12b-it-lora-v4",
+    subfolder: str | None = None,
+    temperature: float = 0.2,
+    max_new_tokens: int = 1024,
+) -> EvalEntry:
+    """The fine-tuned v4 LoRA adapter applied on top of base Gemma 4 12B-it."""
+    t0 = time.perf_counter()
+    try:
+        msgs = format_messages(triple["dockerfile"])
+        model, tok = _hf_dockermin_gemma(model_id, subfolder=subfolder)
+        prompt = tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
+        enc = tok(prompt, return_tensors="pt").to(model.device)
+        out = model.generate(**enc, max_new_tokens=max_new_tokens, temperature=temperature, do_sample=True)
+        text = tok.decode(out[0][enc.input_ids.shape[1] :], skip_special_tokens=True)
+        new_df = extract_dockerfile(text)
+        if new_df is None:
+            return _error_entry("dockermin_v4", triple, t0, "no fenced dockerfile block")
+        return _entry("dockermin_v4", triple, new_df, t0)
+    except Exception as e:  # noqa: BLE001 — safety net: one bad Dockerfile must not crash the eval loop
+        return _error_entry("dockermin_v4", triple, t0, f"dockermin_v4 error: {e!r}")
+
+
+# ---------------------------------------------------------------------------
 # Dispatcher
 # ---------------------------------------------------------------------------
 
@@ -708,6 +762,7 @@ _REGISTRY: dict[str, Callable[..., EvalEntry]] = {
     "slim": baseline_slim,
     "manual": baseline_manual_best_practice,
     "dockermin": baseline_dockermin,
+    "dockermin_v4": baseline_dockermin_gemma,
 }
 
 

@@ -228,7 +228,24 @@ def test_collapse_single_run_unchanged() -> None:
 def test_available_baselines_returns_sorted_known_names() -> None:
     names = baselines.available_baselines()
     assert names == sorted(names)
-    assert {"hadolint", "manual", "qwen_zs", "gemma_zs", "gpt4o", "sonnet_zs", "slim", "dockermin"} <= set(names)
+    assert {
+        "hadolint",
+        "manual",
+        "qwen_zs",
+        "gemma_zs",
+        "gpt4o",
+        "sonnet_zs",
+        "slim",
+        "dockermin",
+        "dockermin_v4",
+    } <= set(names)
+
+
+def test_dockermin_v4_in_registry() -> None:
+    """v4 baseline (Gemma 4 12B-it + LoRA adapter) is registered and dispatchable."""
+    from dockermin.eval.baselines import _REGISTRY
+
+    assert "dockermin_v4" in _REGISTRY
 
 
 def test_register_baseline_adds_dispatchable_name() -> None:
